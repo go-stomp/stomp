@@ -61,6 +61,8 @@ type Conn struct {
 	readTimeout  time.Duration
 	writeTimeout time.Duration
 	closed       bool
+
+	autoSubscription chan *Frame
 }
 
 type writeRequest struct {
@@ -317,7 +319,9 @@ func processLoop(c *Conn, writer *Writer) {
 					if ch, ok := channels[id]; ok {
 						ch <- f
 					} else {
-						log.Println("ignored MESSAGE for subscription", id)
+						if c.autoSubscription != nil {
+							c.autoSubscription <- f
+						}
 					}
 				}
 			}
@@ -499,15 +503,36 @@ func (c *Conn) Subscribe(destination string, ack AckMode) (*Subscription, error)
 	}
 
 	sub := &Subscription{
-		id:          id,
-		destination: destination,
-		conn:        c,
-		ackMode:     ack,
-		C:           make(chan *Message, 16),
+		id:               id,
+		destination:      destination,
+		conn:             c,
+		ackMode:          ack,
+		C:                make(chan *Message, 16),
+		autoSubscription: false,
 	}
 	go sub.readLoop(ch)
 
 	c.writeCh <- request
+	return sub, nil
+}
+
+// Returns a subscription that receives all messages send to this connection on temporary queues.
+func (c *Conn) AutoSubscription() (*Subscription, error) {
+	if c.autoSubscription != nil {
+		return nil, newErrorMessage("Autosubscription as already been initialized")
+	}
+	c.autoSubscription = make(chan *Frame)
+
+	id := allocateId()
+	sub := &Subscription{
+		id:               id,
+		destination:      "",
+		conn:             c,
+		ackMode:          AckAuto,
+		C:                make(chan *Message, 16),
+		autoSubscription: true,
+	}
+	go sub.readLoop(c.autoSubscription)
 	return sub, nil
 }
 
