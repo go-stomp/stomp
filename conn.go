@@ -364,6 +364,8 @@ func processLoop(c *Conn, writer *Writer) {
 
 // Send an error to all receipt channels.
 func sendError(m map[string]chan *Frame, err error) {
+	log.Println("sendError:", err)
+
 	frame := NewFrame(frame.ERROR, frame.Message, err.Error())
 	for _, ch := range m {
 		ch <- frame
@@ -396,6 +398,18 @@ func (c *Conn) Disconnect() error {
 	return c.conn.Close()
 }
 
+func (c *Conn) DisconnectMust() error {
+	if c.closed {
+		return nil
+	}
+
+	// just close readCh and writeCh
+	close(c.readCh)
+	close(c.writeCh)
+
+	c.closed = true
+	return c.conn.Close()
+}
 // Send sends a message to the STOMP server, which in turn sends the message to the specified destination.
 // This method returns without confirming that the STOMP server has received the message. If the STOMP server
 // does fail to receive the message for any reason, the connection will close.
