@@ -404,7 +404,7 @@ func (c *Conn) DisconnectMust() error {
 	}
 
 	// just close readCh and writeCh
-	close(c.readCh)
+	// close(c.readCh)
 	close(c.writeCh)
 
 	c.closed = true
