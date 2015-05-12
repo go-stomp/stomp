@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"gopkg.in/stomp.v1/frame"
+	"github.com/guotie/stomp/frame"
 )
 
 // Default time span to add to read/write heart-beat timeouts
@@ -136,7 +136,11 @@ func Connect(conn io.ReadWriteCloser, opts Options) (*Conn, error) {
 		}
 	}
 
-	writer.Write(connectFrame)
+	err := writer.Write(connectFrame)
+	if err != nil {
+		return nil, err
+	}
+
 	response, err := reader.Read()
 	if err != nil {
 		return nil, err
@@ -411,6 +415,7 @@ func (c *Conn) DisconnectMust() error {
 	c.closed = true
 	return c.conn.Close()
 }
+
 // Send sends a message to the STOMP server, which in turn sends the message to the specified destination.
 // This method returns without confirming that the STOMP server has received the message. If the STOMP server
 // does fail to receive the message for any reason, the connection will close.
