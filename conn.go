@@ -77,6 +77,7 @@ func Dial(network, addr string, opts Options) (*Conn, error) {
 	if err != nil {
 		return nil, err
 	}
+	log.Printf("dial %s success.\n", addr)
 
 	if opts.Host == "" {
 		host, _, err := net.SplitHostPort(c.RemoteAddr().String())
