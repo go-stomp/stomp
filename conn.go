@@ -1,6 +1,7 @@
 package stomp
 
 import (
+	"fmt"
 	"errors"
 	"io"
 	"log"
@@ -185,7 +186,7 @@ func Connect(conn io.ReadWriteCloser, opts Options) (*Conn, error) {
 		}
 
 		c.readTimeout = readTimeout + rtError
-		c.writeTimeout = writeTimeout/2
+		c.writeTimeout = writeTimeout /2
 	}
 
 	// TODO(jpj): make any non-standard headers in the CONNECTED
@@ -227,12 +228,26 @@ func readLoop(c *Conn, reader *Reader) {
 	for {
 		f, err := reader.Read()
 		if err != nil {
-			log.Printf("readLoop: %s\n", err.Error())
+			log.Printf("read failed: %s, exit readLoop\n", err.Error())
 			close(c.readCh)
 			return
 		}
 		c.readCh <- f
 	}
+}
+
+// close connection
+func closeConn(c *Conn, closeReadCh bool) {
+	if c.closed {
+		return
+	}
+
+	if closeReadCh {
+		close(c.readCh)
+	}
+	close(c.writeCh)
+	c.conn.Close()
+	c.closed = true
 }
 
 // processLoop is a goroutine that handles io with
@@ -260,6 +275,8 @@ func processLoop(c *Conn, writer *Writer) {
 			// read timeout, close the connection
 			err := newErrorMessage("read timeout")
 			sendError(channels, err)
+			log.Println("read channel Timeout, exit processLoop.")
+			closeConn(c, true)
 			return
 
 		case <-writeTimeoutChannel:
@@ -267,6 +284,8 @@ func processLoop(c *Conn, writer *Writer) {
 			err := writer.Write(nil)
 			if err != nil {
 				sendError(channels, err)
+				log.Printf("write heart-beat to server failed: %s, exit processLoop.\n", err.Error())
+				closeConn(c, true)
 				return
 			}
 			writeTimer = nil
@@ -283,6 +302,8 @@ func processLoop(c *Conn, writer *Writer) {
 			if !ok {
 				err := newErrorMessage("connection closed")
 				sendError(channels, err)
+				log.Println("readCh closed, exit processLoop.")
+				closeConn(c, false)
 				return
 			}
 
@@ -303,18 +324,19 @@ func processLoop(c *Conn, writer *Writer) {
 				} else {
 					err := &Error{Message: "missing receipt-id", Frame: f}
 					sendError(channels, err)
-					return
+					closeConn(c, true)
+					//return
+					continue
 				}
 
 			case frame.ERROR:
-				log.Println("received ERROR; Closing underlying connection")
+				log.Println("received ERROR; Closing underlying connection, exit processLoop")
 				for _, ch := range channels {
 					ch <- f
 					close(ch)
 				}
 
-				c.closed = true
-				c.conn.Close()
+				closeConn(c, true)
 
 				return
 
@@ -337,6 +359,8 @@ func processLoop(c *Conn, writer *Writer) {
 			}
 			if !ok {
 				sendError(channels, errors.New("write channel closed"))
+				log.Println("write channle closed, exit processLoop.")
+				closeConn(c, true)
 				return
 			}
 			if req.C != nil {
@@ -362,6 +386,8 @@ func processLoop(c *Conn, writer *Writer) {
 			err := writer.Write(req.Frame)
 			if err != nil {
 				sendError(channels, err)
+				log.Printf("send frame to server failed: %s, exit processLoop.\n", err.Error())
+				closeConn(c, true)
 				return
 			}
 		}
@@ -434,8 +460,8 @@ func (c *Conn) Send(destination, contentType string, body []byte, userDefined *H
 
 	f := createSendFrame(destination, contentType, body, userDefined)
 	f.Del(frame.Transaction)
-	c.sendFrame(f)
-	return nil
+	err := c.sendFrame(f)
+	return err
 }
 
 // Send sends a message to the STOMP server, which in turn sends the message to the specified destination.
@@ -482,12 +508,31 @@ func createSendFrame(destination, contentType string, body []byte, userDefined *
 	return f
 }
 
-func (c *Conn) sendFrame(f *Frame) {
+func (c *Conn) sendFrame(f *Frame) error {
+	var err error
+	// send frame
+	defer func() error{
+		if r := recover(); r != nil {
+			err = fmt.Errorf("%v", r)
+		}
+		return err
+	}()
+
 	request := writeRequest{Frame: f}
 	c.writeCh <- request
+	
+	return err
 }
 
 func (c *Conn) sendFrameWithReceipt(f *Frame) error {
+	var err error
+	defer func() error{
+		if r := recover(); r != nil {
+			err = fmt.Errorf("%v", r)
+		}
+		return err
+	}()
+
 	receipt := allocateId()
 	f.Set(frame.Receipt, receipt)
 
