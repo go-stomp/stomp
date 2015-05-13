@@ -181,7 +181,7 @@ func Connect(conn io.ReadWriteCloser, opts Options) (*Conn, error) {
 		}
 
 		c.readTimeout = readTimeout + rtError
-		c.writeTimeout = writeTimeout
+		c.writeTimeout = writeTimeout/2
 	}
 
 	// TODO(jpj): make any non-standard headers in the CONNECTED
@@ -223,6 +223,7 @@ func readLoop(c *Conn, reader *Reader) {
 	for {
 		f, err := reader.Read()
 		if err != nil {
+			log.Printf("readLoop: %s\n", err.Error())
 			close(c.readCh)
 			return
 		}
