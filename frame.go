@@ -53,3 +53,19 @@ func (f *Frame) verifyMandatory(keys ...string) error {
 	}
 	return nil
 }
+
+func (f *Frame) HeaderBytes() (buf []byte) {
+	buf = append(buf, []byte(f.Command)...)
+	buf = append(buf, newlineSlice...)
+	if f.Header != nil {
+		for i := 0; i < f.Header.Len(); i++ {
+			key, value := f.Header.GetAt(i)
+			buf = append(buf, []byte(key)...)
+			buf = append(buf, colonSlice...)
+			buf = append(buf, []byte(value)...)
+			buf = append(buf, newlineSlice...)
+		}
+	}
+	buf = append(buf, newlineSlice...)
+	return
+}

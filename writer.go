@@ -38,41 +38,47 @@ func (w *Writer) Write(f *Frame) error {
 			return err
 		}
 	} else {
-		_, err = w.writer.Write([]byte(f.Command))
-		if err != nil {
-			return err
-		}
+		/*
+			_, err = w.writer.Write([]byte(f.Command))
+			if err != nil {
+				return err
+			}
 
-		_, err = w.writer.Write(newlineSlice)
-		if err != nil {
-			return err
-		}
+			_, err = w.writer.Write(newlineSlice)
+			if err != nil {
+				return err
+			}
 
-		//println("TX:", f.Command)
-		if f.Header != nil {
-			for i := 0; i < f.Header.Len(); i++ {
-				key, value := f.Header.GetAt(i)
-				//println("   ", key, ":", value)
-				_, err = w.writer.Write([]byte(key))
-				if err != nil {
-					return err
-				}
-				_, err = w.writer.Write(colonSlice)
-				if err != nil {
-					return err
-				}
-				_, err = w.writer.Write([]byte(value))
-				if err != nil {
-					return err
-				}
-				_, err = w.writer.Write(newlineSlice)
-				if err != nil {
-					return err
+			//println("TX:", f.Command)
+			if f.Header != nil {
+				for i := 0; i < f.Header.Len(); i++ {
+					key, value := f.Header.GetAt(i)
+					//println("   ", key, ":", value)
+					_, err = w.writer.Write([]byte(key))
+					if err != nil {
+						return err
+					}
+					_, err = w.writer.Write(colonSlice)
+					if err != nil {
+						return err
+					}
+					_, err = w.writer.Write([]byte(value))
+					if err != nil {
+						return err
+					}
+					_, err = w.writer.Write(newlineSlice)
+					if err != nil {
+						return err
+					}
 				}
 			}
-		}
 
-		_, err = w.writer.Write(newlineSlice)
+			_, err = w.writer.Write(newlineSlice)
+			if err != nil {
+				return err
+			}
+		*/
+		_, err = w.writer.Write(f.HeaderBytes())
 		if err != nil {
 			return err
 		}

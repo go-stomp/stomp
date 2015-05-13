@@ -2,7 +2,7 @@ package stomp
 
 import (
 	"bytes"
-	. "gopkg.in/check.v1"
+	//. "gopkg.in/check.v1"
 	"strings"
 )
 
