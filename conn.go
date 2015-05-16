@@ -225,6 +225,13 @@ func (c *Conn) Server() string {
 // reader and places them onto a channel for processing
 // by the processLoop goroutine
 func readLoop(c *Conn, reader *Reader) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Println(r)
+			return
+		}
+	}()
+	
 	for {
 		f, err := reader.Read()
 		if err != nil {
