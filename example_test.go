@@ -2,7 +2,7 @@ package stomp_test
 
 import (
 	"fmt"
-	"gopkg.in/stomp.v1"
+	"github.com/guotie/stomp"
 	"net"
 	"time"
 )

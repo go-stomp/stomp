@@ -3,7 +3,7 @@ package stomp
 import (
 	"bufio"
 	"bytes"
-	"gopkg.in/stomp.v1/frame"
+	"github.com/guotie/stomp/frame"
 	"io"
 )
 

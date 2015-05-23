@@ -2,7 +2,7 @@ package stomp
 
 import (
 	"fmt"
-	"gopkg.in/stomp.v1/frame"
+	"github.com/guotie/stomp/frame"
 	"log"
 )
 
@@ -53,6 +53,18 @@ func (s *Subscription) Unsubscribe() error {
 	}
 	f := NewFrame(frame.UNSUBSCRIBE, frame.Id, s.id)
 	s.conn.sendFrame(f)
+	s.completed = true
+	close(s.C)
+	return nil
+}
+
+// Unsubscribes and closes the channel C without block
+func (s *Subscription) UnsubscribeNonblock() error {
+	if s.completed {
+		return completedSubscription
+	}
+	//f := NewFrame(frame.UNSUBSCRIBE, frame.Id, s.id)
+	//s.conn.sendFrame(f)
 	s.completed = true
 	close(s.C)
 	return nil

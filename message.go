@@ -2,7 +2,7 @@ package stomp
 
 import (
 	"errors"
-	"gopkg.in/stomp.v1/frame"
+	"github.com/guotie/stomp/frame"
 	"strconv"
 )
 

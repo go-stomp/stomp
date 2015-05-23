@@ -1,7 +1,7 @@
 package stomp
 
 import (
-	. "gopkg.in/check.v1"
+//. "gopkg.in/check.v1"
 )
 
 func (s *StompSuite) TestHeaderGetSetAddDel(c *C) {

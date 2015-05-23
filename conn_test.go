@@ -5,8 +5,8 @@ import (
 	"io"
 	"time"
 
-	. "gopkg.in/check.v1"
-	"gopkg.in/stomp.v1/frame"
+	"github.com/guotie/stomp/frame"
+	//. "gopkg.in/check.v1"
 	"gopkg.in/stomp.v1/testutil"
 )
 
