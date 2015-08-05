@@ -1,8 +1,8 @@
 package stomp
 
 import (
-	"fmt"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -186,7 +186,7 @@ func Connect(conn io.ReadWriteCloser, opts Options) (*Conn, error) {
 		}
 
 		c.readTimeout = readTimeout + rtError
-		c.writeTimeout = writeTimeout /2
+		c.writeTimeout = writeTimeout / 2
 	}
 
 	// TODO(jpj): make any non-standard headers in the CONNECTED
@@ -231,7 +231,7 @@ func readLoop(c *Conn, reader *Reader) {
 			return
 		}
 	}()
-	
+
 	for {
 		f, err := reader.Read()
 		if err != nil {
@@ -245,6 +245,13 @@ func readLoop(c *Conn, reader *Reader) {
 
 // close connection
 func closeConn(c *Conn, closeReadCh bool) {
+	defer func() {
+		if err := recover(); err != nil {
+			// 记录到日志中
+			log.Printf("closeConn: %v\n", err)
+		}
+	}()
+
 	if c.closed {
 		return
 	}
@@ -518,7 +525,7 @@ func createSendFrame(destination, contentType string, body []byte, userDefined *
 func (c *Conn) sendFrame(f *Frame) error {
 	var err error
 	// send frame
-	defer func() error{
+	defer func() error {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("%v", r)
 		}
@@ -527,13 +534,13 @@ func (c *Conn) sendFrame(f *Frame) error {
 
 	request := writeRequest{Frame: f}
 	c.writeCh <- request
-	
+
 	return err
 }
 
 func (c *Conn) sendFrameWithReceipt(f *Frame) error {
 	var err error
-	defer func() error{
+	defer func() error {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("%v", r)
 		}
