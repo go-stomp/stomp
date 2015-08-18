@@ -88,6 +88,13 @@ func (s *Subscription) Read() (*Message, error) {
 }
 
 func (s *Subscription) readLoop(ch chan *Frame) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Println(r)
+			return
+		}
+	}()
+
 	for {
 		f, ok := <-ch
 		if !ok {
