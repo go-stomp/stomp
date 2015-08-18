@@ -274,6 +274,13 @@ func processLoop(c *Conn, writer *Writer) {
 	var writeTimeoutChannel <-chan time.Time
 	var writeTimer *time.Timer
 
+	defer func() {
+		if err := recover(); err != nil {
+			// 记录到日志中
+			log.Printf("processLoop: %v\n", err)
+		}
+	}()
+
 	for {
 		if c.readTimeout > 0 && readTimer == nil {
 			readTimer := time.NewTimer(c.readTimeout)
