@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/guotie/stomp/frame"
@@ -50,6 +51,11 @@ type Options struct {
 	NonStandard *Header
 }
 
+type connChan struct {
+	sync.Mutex
+	channels map[string]chan *Frame
+}
+
 // A Conn is a connection to a STOMP server. Create a Conn using either
 // the Dial or Connect function.
 type Conn struct {
@@ -62,6 +68,10 @@ type Conn struct {
 	readTimeout  time.Duration
 	writeTimeout time.Duration
 	closed       bool
+
+	// 2015-08-19 guotie
+	// 读写分离
+	channels connChan
 }
 
 type writeRequest struct {
@@ -157,6 +167,8 @@ func Connect(conn io.ReadWriteCloser, opts Options) (*Conn, error) {
 		writeCh: make(chan writeRequest, 8),
 		server:  response.Get(frame.Server),
 		session: response.Get(frame.Session),
+
+		channels: connChan{channels: make(map[string]chan *Frame)},
 	}
 
 	if version := response.Get(frame.Version); version != "" {
@@ -193,6 +205,7 @@ func Connect(conn io.ReadWriteCloser, opts Options) (*Conn, error) {
 	// frame available.
 
 	go readLoop(c, reader)
+	go processReadLoop(c)
 	go processLoop(c, writer)
 
 	return c, nil
@@ -264,20 +277,26 @@ func closeConn(c *Conn, closeReadCh bool) {
 	c.closed = true
 }
 
-// processLoop is a goroutine that handles io with
-// the server.
-func processLoop(c *Conn, writer *Writer) {
-	channels := make(map[string]chan *Frame)
+// 避免发送到channel的阻塞操作，先把map copy一份
+func copyChannels(cc connChan) *connChan {
+	var m = connChan{}
 
+	cc.Lock()
+	for key, v := range cc.channels {
+		m.channels[key] = v
+	}
+	cc.Unlock()
+	return &m
+}
+
+func processReadLoop(c *Conn) {
 	var readTimeoutChannel <-chan time.Time
 	var readTimer *time.Timer
-	var writeTimeoutChannel <-chan time.Time
-	var writeTimer *time.Timer
 
 	defer func() {
 		if err := recover(); err != nil {
 			// 记录到日志中
-			log.Printf("processLoop: %v\n", err)
+			log.Printf("processReadLoop: %v\n", err)
 		}
 	}()
 
@@ -286,32 +305,14 @@ func processLoop(c *Conn, writer *Writer) {
 			readTimer := time.NewTimer(c.readTimeout)
 			readTimeoutChannel = readTimer.C
 		}
-		if c.writeTimeout > 0 && writeTimer == nil {
-			writeTimer := time.NewTimer(c.writeTimeout)
-			writeTimeoutChannel = writeTimer.C
-		}
-
 		select {
 		case <-readTimeoutChannel:
 			// read timeout, close the connection
 			err := newErrorMessage("read timeout")
-			sendError(channels, err)
+			sendError(c, err)
 			log.Println("read channel Timeout, exit processLoop.")
 			closeConn(c, true)
 			return
-
-		case <-writeTimeoutChannel:
-			// write timeout, send a heart-beat frame
-			err := writer.Write(nil)
-			if err != nil {
-				sendError(channels, err)
-				log.Printf("write heart-beat to server failed: %s, exit processLoop.\n", err.Error())
-				closeConn(c, true)
-				return
-			}
-			writeTimer = nil
-			writeTimeoutChannel = nil
-
 		case f, ok := <-c.readCh:
 			// stop the read timer
 			if readTimer != nil {
@@ -322,7 +323,7 @@ func processLoop(c *Conn, writer *Writer) {
 
 			if !ok {
 				err := newErrorMessage("connection closed")
-				sendError(channels, err)
+				sendError(c, err)
 				log.Println("readCh closed, exit processLoop.")
 				closeConn(c, false)
 				return
@@ -336,15 +337,20 @@ func processLoop(c *Conn, writer *Writer) {
 			switch f.Command {
 			case frame.RECEIPT:
 				if id, ok := f.Contains(frame.ReceiptId); ok {
-					if ch, ok := channels[id]; ok {
+					c.channels.Lock()
+					ch, ok := c.channels.channels[id]
+					if ok {
+						delete(c.channels.channels, id)
+					}
+					c.channels.Unlock()
+					if ok {
 						ch <- f
-						delete(channels, id)
 						close(ch)
 					}
 
 				} else {
 					err := &Error{Message: "missing receipt-id", Frame: f}
-					sendError(channels, err)
+					sendError(c, err)
 					closeConn(c, true)
 					//return
 					continue
@@ -352,7 +358,11 @@ func processLoop(c *Conn, writer *Writer) {
 
 			case frame.ERROR:
 				log.Println("received ERROR; Closing underlying connection, exit processLoop")
-				for _, ch := range channels {
+				c.channels.Lock()
+				nc := copyChannels(c.channels)
+				c.channels.Unlock()
+
+				for _, ch := range nc.channels {
 					ch <- f
 					close(ch)
 				}
@@ -363,14 +373,131 @@ func processLoop(c *Conn, writer *Writer) {
 
 			case frame.MESSAGE:
 				if id, ok := f.Contains(frame.Subscription); ok {
-					if ch, ok := channels[id]; ok {
-						ch <- f
+					c.channels.Lock()
+					ch1, ok := c.channels.channels[id]
+					c.channels.Unlock()
+					if ok {
+						ch1 <- f
 					} else {
 						log.Println("ignored MESSAGE for subscription", id)
 					}
 				}
 			}
+		}
+	}
+}
 
+// processLoop is a goroutine that handles io with
+// the server.
+func processLoop(c *Conn, writer *Writer) {
+	//channels := make(map[string]chan *Frame)
+	//channels := c.channels
+
+	//var readTimeoutChannel <-chan time.Time
+	//var readTimer *time.Timer
+	var writeTimeoutChannel <-chan time.Time
+	var writeTimer *time.Timer
+
+	defer func() {
+		if err := recover(); err != nil {
+			// 记录到日志中
+			log.Printf("processLoop: %v\n", err)
+		}
+	}()
+
+	for {
+		/*
+			if c.readTimeout > 0 && readTimer == nil {
+				readTimer := time.NewTimer(c.readTimeout)
+				readTimeoutChannel = readTimer.C
+			}
+		*/
+		if c.writeTimeout > 0 && writeTimer == nil {
+			writeTimer := time.NewTimer(c.writeTimeout)
+			writeTimeoutChannel = writeTimer.C
+		}
+
+		select {
+		/*
+			case <-readTimeoutChannel:
+				// read timeout, close the connection
+				err := newErrorMessage("read timeout")
+				sendError(c, err)
+				log.Println("read channel Timeout, exit processLoop.")
+				closeConn(c, true)
+				return
+		*/
+		case <-writeTimeoutChannel:
+			// write timeout, send a heart-beat frame
+			err := writer.Write(nil)
+			if err != nil {
+				sendError(c, err)
+				log.Printf("write heart-beat to server failed: %s, exit processLoop.\n", err.Error())
+				closeConn(c, true)
+				return
+			}
+			writeTimer = nil
+			writeTimeoutChannel = nil
+			/*
+				case f, ok := <-c.readCh:
+					// stop the read timer
+					if readTimer != nil {
+						readTimer.Stop()
+						readTimer = nil
+						readTimeoutChannel = nil
+					}
+
+					if !ok {
+						err := newErrorMessage("connection closed")
+						sendError(channels, err)
+						log.Println("readCh closed, exit processLoop.")
+						closeConn(c, false)
+						return
+					}
+
+					if f == nil {
+						// heart-beat received
+						continue
+					}
+
+					switch f.Command {
+					case frame.RECEIPT:
+						if id, ok := f.Contains(frame.ReceiptId); ok {
+							if ch, ok := channels[id]; ok {
+								ch <- f
+								delete(channels, id)
+								close(ch)
+							}
+
+						} else {
+							err := &Error{Message: "missing receipt-id", Frame: f}
+							sendError(channels, err)
+							closeConn(c, true)
+							//return
+							continue
+						}
+
+					case frame.ERROR:
+						log.Println("received ERROR; Closing underlying connection, exit processLoop")
+						for _, ch := range channels {
+							ch <- f
+							close(ch)
+						}
+
+						closeConn(c, true)
+
+						return
+
+					case frame.MESSAGE:
+						if id, ok := f.Contains(frame.Subscription); ok {
+							if ch, ok := channels[id]; ok {
+								ch <- f
+							} else {
+								log.Println("ignored MESSAGE for subscription", id)
+							}
+						}
+					}
+			*/
 		case req, ok := <-c.writeCh:
 			// stop the write timeout
 			if writeTimer != nil {
@@ -378,8 +505,9 @@ func processLoop(c *Conn, writer *Writer) {
 				writeTimer = nil
 				writeTimeoutChannel = nil
 			}
+
 			if !ok {
-				sendError(channels, errors.New("write channel closed"))
+				sendError(c, errors.New("write channel closed"))
 				log.Println("write channle closed, exit processLoop.")
 				closeConn(c, true)
 				return
@@ -387,14 +515,18 @@ func processLoop(c *Conn, writer *Writer) {
 			if req.C != nil {
 				if receipt, ok := req.Frame.Contains(frame.Receipt); ok {
 					// remember the channel for this receipt
-					channels[receipt] = req.C
+					c.channels.Lock()
+					c.channels.channels[receipt] = req.C
+					c.channels.Unlock()
 				}
 			}
 
 			switch req.Frame.Command {
 			case frame.SUBSCRIBE:
 				id, _ := req.Frame.Contains(frame.Id)
-				channels[id] = req.C
+				c.channels.Lock()
+				c.channels.channels[id] = req.C
+				c.channels.Unlock()
 			case frame.UNSUBSCRIBE:
 				id, _ := req.Frame.Contains(frame.Id)
 				// is this trying to be too clever -- add a receipt
@@ -404,20 +536,31 @@ func processLoop(c *Conn, writer *Writer) {
 			}
 
 			// frame to send
+			// 2015-08-19 gutie
+			// 这里可能会阻塞，导致整个select阻塞，无法从队列中读取消息
 			err := writer.Write(req.Frame)
 			if err != nil {
-				sendError(channels, err)
+				sendError(c, err)
 				log.Printf("send frame to server failed: %s, exit processLoop.\n", err.Error())
 				closeConn(c, true)
 				return
 			}
+
 		}
 	}
 }
 
 // Send an error to all receipt channels.
-func sendError(m map[string]chan *Frame, err error) {
+//func sendError(m map[string]chan *Frame, err error) {
+func sendError(c *Conn, err error) {
+	var m = make(map[string]chan *Frame)
 	log.Println("sendError:", err)
+
+	c.channels.Lock()
+	for key, ch := range c.channels.channels {
+		m[key] = ch
+	}
+	c.channels.Unlock()
 
 	frame := NewFrame(frame.ERROR, frame.Message, err.Error())
 	for _, ch := range m {
@@ -581,6 +724,16 @@ func (c *Conn) Subscribe(destination string, ack AckMode) (*Subscription, error)
 func (c *Conn) SubscribeWithHeaders(destination string, ack AckMode, userDefined *Header) (*Subscription, error) {
 	ch := make(chan *Frame)
 	headers := userDefined.Clone()
+
+	// 2015-08-19
+	// 在下面的go sub.readLoop(ch)发生panic，不得解
+	defer func() error {
+		var err error
+		if r := recover(); r != nil {
+			err = fmt.Errorf("%v", r)
+		}
+		return err
+	}()
 
 	if _, ok := headers.Contains(frame.Id); !ok {
 		headers.Add(frame.Id, allocateId())
