@@ -252,9 +252,9 @@ func readLoop(c *Conn, reader *Reader) {
 			close(c.readCh)
 			return
 		}
-		log.Println("readLoop read:", f)
+		//log.Println("readLoop read:", f)
 		c.readCh <- f
-		log.Println("readLoop send msg to readCh complete.")
+		//log.Println("readLoop send msg to readCh complete.")
 	}
 }
 
