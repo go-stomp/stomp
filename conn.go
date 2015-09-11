@@ -413,12 +413,6 @@ func processLoop(c *Conn, writer *Writer) {
 		}
 	}()
 
-	if c.readTimeout > 0 {
-		readTimer = time.NewTimer(c.readTimeout)
-	}
-	if c.writeTimeout > 0 {
-		writeTimer = time.NewTimer(c.writeTimeout)
-	}
 	for {
 
 		if c.readTimeout > 0 && readTimer == nil {
@@ -432,7 +426,6 @@ func processLoop(c *Conn, writer *Writer) {
 		}
 
 		select {
-
 		case <-readTimeoutChannel:
 			//case <-readTimer.C:
 			// read timeout, close the connection
@@ -453,7 +446,7 @@ func processLoop(c *Conn, writer *Writer) {
 				return
 			}
 			//writeTimer.Reset(c.writeTimeout)
-			writeTimer.Stop()
+			//writeTimer.Stop()
 			writeTimer = nil
 			writeTimeoutChannel = nil
 
