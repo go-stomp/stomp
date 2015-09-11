@@ -199,6 +199,7 @@ func Connect(conn io.ReadWriteCloser, opts Options) (*Conn, error) {
 
 		c.readTimeout = readTimeout + rtError
 		c.writeTimeout = writeTimeout / 2
+		//println(c.readTimeout, c.writeTimeout)
 	}
 
 	// TODO(jpj): make any non-standard headers in the CONNECTED
