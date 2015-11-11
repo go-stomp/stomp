@@ -542,3 +542,58 @@ func createHeartBeatConnection(
 		conn:   fc2,
 	}
 }
+
+func (s *StompSuite) TestDefaultSubscription(c *C) {
+	conn, rw := connectHelper(c, V12)
+	stop := make(chan struct{})
+
+	go func() {
+		defer func() {
+			rw.Close()
+			close(stop)
+		}()
+
+		f1, err := rw.Read()
+		c.Assert(err, IsNil)
+		c.Assert(f1.Command, Equals, "SEND")
+
+		destination := f1.Header.Get("destination")
+		c.Assert(destination, Equals, "/queue/test-1")
+
+		replyTo := f1.Header.Get("reply-to")
+		c.Assert(replyTo, Matches, "^/temp-queue/.+")
+
+		c.Assert(string(f1.Body), Equals, "Message body")
+
+		messageId := "message-1"
+		f2 := frame.New("MESSAGE",
+			frame.Subscription, replyTo,
+			frame.MessageId, messageId,
+			frame.Destination, replyTo)
+
+		f2.Body = []byte("Message body")
+		rw.Write(f2)
+
+		f3, _ := rw.Read()
+		c.Assert(f3.Command, Equals, "DISCONNECT")
+		rw.Write(frame.New(frame.RECEIPT,
+			frame.ReceiptId, f3.Header.Get(frame.Receipt)))
+
+	}()
+
+	defaultSubscription, err := conn.DefaultSubscription()
+	c.Assert(err, IsNil)
+
+	err = conn.Send("/queue/test-1", "text/plain", []byte("Message body"), SendOpt.Header("reply-to", "/temp-queue/test"))
+	c.Assert(err, IsNil)
+
+	msg, ok := <-defaultSubscription.C
+	c.Assert(ok, Equals, true)
+	c.Assert(string(msg.Body), Equals, "Message body")
+
+	err = defaultSubscription.Unsubscribe()
+	c.Assert(err, IsNil)
+
+	err = conn.Disconnect()
+	c.Assert(err, IsNil)
+}

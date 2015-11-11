@@ -117,7 +117,6 @@ func (r *Reader) Read() (*Frame, error) {
 			}
 			bytesRead += n
 		}
-
 		// read the next byte and verify that it is a null byte
 		terminator, err := r.reader.ReadByte()
 		if err != nil {
