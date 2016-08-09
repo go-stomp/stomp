@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/go-stomp/stomp/frame"
@@ -18,16 +19,18 @@ const DefaultHeartBeatError = 5 * time.Second
 // A Conn is a connection to a STOMP server. Create a Conn using either
 // the Dial or Connect function.
 type Conn struct {
-	conn         io.ReadWriteCloser
-	readCh       chan *frame.Frame
-	writeCh      chan writeRequest
-	version      Version
-	session      string
-	server       string
-	readTimeout  time.Duration
-	writeTimeout time.Duration
-	closed       bool
-	options      *connOptions
+	conn                    io.ReadWriteCloser
+	readCh                  chan *frame.Frame
+	writeCh                 chan writeRequest
+	version                 Version
+	session                 string
+	server                  string
+	readTimeout             time.Duration
+	writeTimeout            time.Duration
+	closed                  bool
+	options                 *connOptions
+	defaultSubscription     chan *frame.Frame
+	defaultSubscriptionLock sync.Mutex
 }
 
 type writeRequest struct {
@@ -225,14 +228,14 @@ func processLoop(c *Conn, writer *frame.Writer) {
 		case <-readTimeoutChannel:
 			// read timeout, close the connection
 			err := newErrorMessage("read timeout")
-			sendError(channels, err)
+			c.sendError(channels, err)
 			return
 
 		case <-writeTimeoutChannel:
 			// write timeout, send a heart-beat frame
 			err := writer.Write(nil)
 			if err != nil {
-				sendError(channels, err)
+				c.sendError(channels, err)
 				return
 			}
 			writeTimer = nil
@@ -248,7 +251,7 @@ func processLoop(c *Conn, writer *frame.Writer) {
 
 			if !ok {
 				err := newErrorMessage("connection closed")
-				sendError(channels, err)
+				c.sendError(channels, err)
 				return
 			}
 
@@ -267,7 +270,7 @@ func processLoop(c *Conn, writer *frame.Writer) {
 					}
 				} else {
 					err := &Error{Message: "missing receipt-id", Frame: f}
-					sendError(channels, err)
+					c.sendError(channels, err)
 					return
 				}
 
@@ -288,7 +291,13 @@ func processLoop(c *Conn, writer *frame.Writer) {
 					if ch, ok := channels[id]; ok {
 						ch <- f
 					} else {
-						log.Println("ignored MESSAGE for subscription", id)
+						c.defaultSubscriptionLock.Lock()
+						if c.defaultSubscription != nil {
+							c.defaultSubscription <- f
+						} else {
+							log.Println("ignored MESSAGE for subscription", id)
+						}
+						c.defaultSubscriptionLock.Unlock()
 					}
 				}
 			}
@@ -301,7 +310,7 @@ func processLoop(c *Conn, writer *frame.Writer) {
 				writeTimeoutChannel = nil
 			}
 			if !ok {
-				sendError(channels, errors.New("write channel closed"))
+				c.sendError(channels, errors.New("write channel closed"))
 				return
 			}
 			if req.C != nil {
@@ -326,7 +335,7 @@ func processLoop(c *Conn, writer *frame.Writer) {
 			// frame to send
 			err := writer.Write(req.Frame)
 			if err != nil {
-				sendError(channels, err)
+				c.sendError(channels, err)
 				return
 			}
 		}
@@ -334,10 +343,16 @@ func processLoop(c *Conn, writer *frame.Writer) {
 }
 
 // Send an error to all receipt channels.
-func sendError(m map[string]chan *frame.Frame, err error) {
+func (c *Conn) sendError(m map[string]chan *frame.Frame, err error) {
 	frame := frame.New(frame.ERROR, frame.Message, err.Error())
 	for _, ch := range m {
 		ch <- frame
+	}
+
+	c.defaultSubscriptionLock.Lock()
+	defer c.defaultSubscriptionLock.Unlock()
+	if c.defaultSubscription != nil {
+		c.defaultSubscription <- frame
 	}
 }
 
@@ -517,6 +532,28 @@ func (c *Conn) Subscribe(destination string, ack AckMode, opts ...func(*frame.Fr
 	go sub.readLoop(ch)
 
 	c.writeCh <- request
+	return sub, nil
+}
+
+// Returns a subscription that receives all messages sentg to this connection on temporary queues.
+func (c *Conn) DefaultSubscription() (*Subscription, error) {
+	c.defaultSubscriptionLock.Lock()
+	defer c.defaultSubscriptionLock.Unlock()
+	if c.defaultSubscription != nil {
+		return nil, newErrorMessage("Default subscription has as already been initialized")
+	}
+	c.defaultSubscription = make(chan *frame.Frame)
+
+	id := allocateId()
+	sub := &Subscription{
+		id:                  id,
+		destination:         "",
+		conn:                c,
+		ackMode:             AckAuto,
+		C:                   make(chan *Message, 16),
+		defaultSubscription: true,
+	}
+	go sub.readLoop(c.defaultSubscription)
 	return sub, nil
 }
 

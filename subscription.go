@@ -12,12 +12,13 @@ import (
 //
 // Once a client has subscribed, it can receive messages from the C channel.
 type Subscription struct {
-	C           chan *Message
-	id          string
-	destination string
-	conn        *Conn
-	ackMode     AckMode
-	completed   bool
+	C                   chan *Message
+	id                  string
+	destination         string
+	conn                *Conn
+	ackMode             AckMode
+	completed           bool
+	defaultSubscription bool
 }
 
 // BUG(jpj): If the client does not read messages from the Subscription.C
@@ -52,8 +53,17 @@ func (s *Subscription) Unsubscribe() error {
 	if s.completed {
 		return ErrCompletedSubscription
 	}
-	f := frame.New(frame.UNSUBSCRIBE, frame.Id, s.id)
-	s.conn.sendFrame(f)
+	if s.defaultSubscription {
+		s.conn.defaultSubscriptionLock.Lock()
+		close(s.conn.defaultSubscription)
+		s.conn.defaultSubscription = nil
+		s.conn.defaultSubscriptionLock.Unlock()
+
+	} else {
+		f := frame.New(frame.UNSUBSCRIBE, frame.Id, s.id)
+		s.conn.sendFrame(f)
+	}
+
 	s.completed = true
 	close(s.C)
 	return nil
