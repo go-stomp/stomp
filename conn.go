@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"sync"
 	"time"
-
+	"crypto/tls"
 	"github.com/go-stomp/stomp/frame"
 )
 
@@ -35,6 +35,31 @@ type writeRequest struct {
 	Frame *frame.Frame      // frame to send
 	C     chan *frame.Frame // response channel
 }
+
+
+// Dial creates a network connection to a STOMP server over SSL and performs
+// the STOMP connect protocol sequence. The network endpoint of the
+// STOMP server is specified by network and addr. STOMP protocol
+// options can be specified in opts.
+func DialSsl(network, addr string, config *tls.Config, opts ...func(*Conn) error) (*Conn, error) {
+	c, err := tls.Dial(network, addr, config)
+	if err != nil {
+		return nil, err
+	}
+
+	host, _, err := net.SplitHostPort(c.RemoteAddr().String())
+	if err != nil {
+		c.Close()
+		return nil, err
+	}
+
+	// Add option to set host and make it the first option in list,
+	// so that if host has been explicitly specified it will override.
+	opts = append([](func(*Conn) error){ConnOpt.Host(host)}, opts...)
+
+	return Connect(c, opts...)
+}
+
 
 // Dial creates a network connection to a STOMP server and performs
 // the STOMP connect protocol sequence. The network endpoint of the
@@ -212,8 +237,6 @@ func processLoop(c *Conn, writer *frame.Writer) {
 	var writeTimeoutChannel <-chan time.Time
 	var writeTimer *time.Timer
 
-	defer c.MustDisconnect()
-
 	for {
 		if c.readTimeout > 0 && readTimer == nil {
 			readTimer = time.NewTimer(c.readTimeout)
@@ -236,6 +259,8 @@ func processLoop(c *Conn, writer *frame.Writer) {
 			err := writer.Write(nil)
 			if err != nil {
 				sendError(channels, err)
+				writeTimer = nil
+				writeTimeoutChannel = nil
 				return
 			}
 			writeTimer = nil
@@ -378,7 +403,8 @@ func (c *Conn) MustDisconnect() error {
 		return nil
 	}
 
-	// just close writeCh
+	// just close readCh and writeCh
+	// close(c.readCh)
 	close(c.writeCh)
 
 	c.closed = true
@@ -450,11 +476,6 @@ func createSendFrame(destination, contentType string, body []byte, opts []func(*
 }
 
 func (c *Conn) sendFrame(f *frame.Frame) error {
-	if c.closed {
-		defer c.conn.Close()
-		return ErrClosedUnexpectedly
-	}
-
 	if _, ok := f.Header.Contains(frame.Receipt); ok {
 		// receipt required
 		request := writeRequest{
@@ -463,19 +484,7 @@ func (c *Conn) sendFrame(f *frame.Frame) error {
 		}
 
 		c.writeCh <- request
-
-		var response *frame.Frame
-
-		if c.writeTimeout > 0 {
-			select {
-			case response, ok = <-request.C:
-			case <-time.After(c.writeTimeout):
-				ok = false
-			}
-		} else {
-			response, ok = <-request.C
-		}
-
+		response, ok := <-request.C
 		if ok {
 			if response.Command != frame.RECEIPT {
 				return newError(response)
