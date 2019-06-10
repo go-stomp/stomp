@@ -19,7 +19,7 @@ import (
 Version 2:
 ```go
 import (
-    "github.com/go-stomp/stomp"
+    "github.com/ingelectus/stomp"
 )
 ```
 
@@ -46,11 +46,11 @@ package, and the types moved are not needed in normal usage of the `stomp` packa
 Version 2 of the stomp library makes use of functional options to provide a clean, flexible way
 of specifying options in the following API calls:
 
-* [Dial()](http://godoc.org/github.com/go-stomp/stomp#Dial)
-* [Connect()](http://godoc.org/github.com/go-stomp/stomp#Connect)
-* [Conn.Send()](http://godoc.org/github.com/go-stomp/stomp#Conn.Send)
-* [Transaction.Send()](http://godoc.org/github.com/go-stomp/stomp#Transaction.Send)
-* [Conn.Subscribe()](http://godoc.org/github.com/go-stomp/stomp#Conn.Subscribe)
+* [Dial()](http://godoc.org/github.com/ingelectus/stomp#Dial)
+* [Connect()](http://godoc.org/github.com/ingelectus/stomp#Connect)
+* [Conn.Send()](http://godoc.org/github.com/ingelectus/stomp#Conn.Send)
+* [Transaction.Send()](http://godoc.org/github.com/ingelectus/stomp#Transaction.Send)
+* [Conn.Subscribe()](http://godoc.org/github.com/ingelectus/stomp#Conn.Subscribe)
 
 The idea for this comes from Dave Cheney's very excellent blog post,
 [Functional Options for Friendly APIs](http://dave.cheney.net/2014/10/17/functional-options-for-friendly-apis).

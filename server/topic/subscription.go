@@ -1,7 +1,7 @@
 package topic
 
 import (
-	"github.com/go-stomp/stomp/frame"
+	"github.com/ingelectus/stomp/frame"
 )
 
 // Subscription is the interface that wraps a subscriber to a topic.

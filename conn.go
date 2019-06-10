@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-stomp/stomp/frame"
+	"github.com/ingelectus/stomp/frame"
 )
 
 // Default time span to add to read/write heart-beat timeouts
@@ -682,4 +682,9 @@ func (c *Conn) createAckNackFrame(msg *Message, ack bool) (*frame.Frame, error) 
 	}
 
 	return f, nil
+}
+
+// IsClosed checks if active stomp connection is closed
+func (c *Conn) IsClosed() bool {
+	return c.closed
 }

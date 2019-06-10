@@ -20,7 +20,7 @@ Disconnect method. This will perform a graceful shutdown sequence as specified i
 
 Source code and other details for the project are available at GitHub:
 
-   https://github.com/go-stomp/stomp
+   https://github.com/ingelectus/stomp
 
 */
 package stomp

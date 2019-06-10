@@ -14,10 +14,10 @@ Features:
 ## Usage Instructions
 
 ```
-go get github.com/go-stomp/stomp
+go get github.com/ingelectus/stomp
 ```
 
-For API documentation, see http://godoc.org/github.com/go-stomp/stomp
+For API documentation, see http://godoc.org/github.com/ingelectus/stomp
 
 ## Previous Version
 

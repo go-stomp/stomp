@@ -1,7 +1,7 @@
 package server
 
 import (
-	"github.com/go-stomp/stomp/frame"
+	"github.com/ingelectus/stomp/frame"
 )
 
 // QueueStorage is an interface that abstracts the queue storage mechanism.
