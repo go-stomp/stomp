@@ -25,3 +25,4 @@ _testmain.go
 
 # used for generating documentation during development
 doc.txt
+go.sum
