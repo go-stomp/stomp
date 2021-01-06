@@ -17,7 +17,7 @@ Features:
 go get github.com/go-stomp/stomp
 ```
 
-For API documentation, see http://godoc.org/github.com/go-stomp/stomp/v2
+For API documentation, see https://pkg.go.dev/github.com/go-stomp/stomp/v2
 
 ## Previous Version
 
