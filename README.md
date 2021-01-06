@@ -14,7 +14,7 @@ Features:
 ## Usage Instructions
 
 ```
-go get github.com/go-stomp/stomp
+go get github.com/go-stomp/stomp/v2
 ```
 
 For API documentation, see https://pkg.go.dev/github.com/go-stomp/stomp/v2
