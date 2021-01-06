@@ -1,4 +1,4 @@
-module github.com/go-stomp/stomp
+module github.com/go-stomp/stomp/v2
 
 go 1.11
 

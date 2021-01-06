@@ -1,7 +1,7 @@
 package stomp
 
 import (
-	"github.com/go-stomp/stomp/frame"
+	"github.com/go-stomp/stomp/v2/frame"
 )
 
 // SubscribeOpt contains options for for the Conn.Subscribe function.

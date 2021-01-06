@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-stomp/stomp/frame"
+	"github.com/go-stomp/stomp/v2/frame"
 )
 
 // Default time span to add to read/write heart-beat timeouts

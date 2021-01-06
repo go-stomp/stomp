@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/go-stomp/stomp"
-	"github.com/go-stomp/stomp/frame"
+	"github.com/go-stomp/stomp/v2"
+	"github.com/go-stomp/stomp/v2/frame"
 )
 
 // Maximum number of pending frames allowed to a client.

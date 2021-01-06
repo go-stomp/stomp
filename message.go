@@ -2,7 +2,7 @@ package stomp
 
 import (
 	"io"
-	"github.com/go-stomp/stomp/frame"
+	"github.com/go-stomp/stomp/v2/frame"
 )
 
 // A Message represents a message received from the STOMP server.

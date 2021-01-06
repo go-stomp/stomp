@@ -6,7 +6,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/go-stomp/stomp"
+	"github.com/go-stomp/stomp/v2"
 	. "gopkg.in/check.v1"
 )
 

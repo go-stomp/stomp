@@ -5,8 +5,8 @@ import (
 	"net"
 	"time"
 
-	"github.com/go-stomp/stomp"
-	"github.com/go-stomp/stomp/frame"
+	"github.com/go-stomp/stomp/v2"
+	"github.com/go-stomp/stomp/v2/frame"
 )
 
 func ExampleConn_Send(c *stomp.Conn) error {
