@@ -42,9 +42,14 @@ func encodeValue(s string) []byte {
 	return buf
 }
 
+func b2s(b []byte) string {
+	/* #nosec G103 */
+	return *(*string)(unsafe.Pointer(&b))
+}
+
 // Unencodes a header value using STOMP value encoding
 // TODO: return error if invalid sequences found (eg "\t")
 func unencodeValue(b []byte) (string, error) {
-	s := replacerForUnencodeValue.Replace(string(b))
+	s := replacerForUnencodeValue.Replace(b2s(b))
 	return s, nil
 }
