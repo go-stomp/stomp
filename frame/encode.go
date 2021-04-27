@@ -20,12 +20,26 @@ var (
 	)
 )
 
+
+type appendSliceWriter []byte
+
+// Write writes to the buffer to satisfy io.Writer.
+func (w *appendSliceWriter) Write(p []byte) (int, error) {
+	*w = append(*w, p...)
+	return len(p), nil
+}
+
+// WriteString writes to the buffer without string->[]byte->string allocations.
+func (w *appendSliceWriter) WriteString(s string) (int, error) {
+	*w = append(*w, s...)
+	return len(s), nil
+}
+
 // Encodes a header value using STOMP value encoding
 func encodeValue(s string) []byte {
-	var buf bytes.Buffer
-	buf.Grow(len(s))
+	buf := make(appendSliceWriter, 0, len(s))
 	replacerForEncodeValue.WriteString(&buf, s)
-	return buf.Bytes()
+	return buf
 }
 
 // Unencodes a header value using STOMP value encoding
