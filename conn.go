@@ -231,6 +231,7 @@ func readLoop(c *Conn, reader *frame.Reader) {
 	for {
 		f, err := reader.Read()
 		if err != nil {
+			log.Println(err)
 			close(c.readCh)
 			return
 		}
