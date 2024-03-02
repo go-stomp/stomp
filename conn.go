@@ -24,28 +24,32 @@ const DefaultRcvReceiptTimeout = 30 * time.Second
 // Default receipt timeout in Conn.Disconnect function
 const DefaultDisconnectReceiptTimeout = 30 * time.Second
 
+// Default receipt timeout in Subscription.Unsubscribe function
+const DefaultUnsubscribeReceiptTimeout = 30 * time.Second
+
 // Reply-To header used for temporary queues/RPC with rabbit.
 const ReplyToHeader = "reply-to"
 
 // A Conn is a connection to a STOMP server. Create a Conn using either
 // the Dial or Connect function.
 type Conn struct {
-	conn                     io.ReadWriteCloser
-	readCh                   chan *frame.Frame
-	writeCh                  chan writeRequest
-	version                  Version
-	session                  string
-	server                   string
-	readTimeout              time.Duration
-	writeTimeout             time.Duration
-	msgSendTimeout           time.Duration
-	rcvReceiptTimeout        time.Duration
-	disconnectReceiptTimeout time.Duration
-	hbGracePeriodMultiplier  float64
-	closed                   bool
-	closeMutex               *sync.Mutex
-	options                  *connOptions
-	log                      Logger
+	conn                      io.ReadWriteCloser
+	readCh                    chan *frame.Frame
+	writeCh                   chan writeRequest
+	version                   Version
+	session                   string
+	server                    string
+	readTimeout               time.Duration
+	writeTimeout              time.Duration
+	msgSendTimeout            time.Duration
+	rcvReceiptTimeout         time.Duration
+	disconnectReceiptTimeout  time.Duration
+	unsubscribeReceiptTimeout time.Duration
+	hbGracePeriodMultiplier   float64
+	closed                    bool
+	closeMutex                *sync.Mutex
+	options                   *connOptions
+	log                       Logger
 }
 
 type writeRequest struct {
@@ -204,6 +208,7 @@ func Connect(conn io.ReadWriteCloser, opts ...func(*Conn) error) (*Conn, error) 
 	c.msgSendTimeout = options.MsgSendTimeout
 	c.rcvReceiptTimeout = options.RcvReceiptTimeout
 	c.disconnectReceiptTimeout = options.DisconnectReceiptTimeout
+	c.unsubscribeReceiptTimeout = options.UnsubscribeReceiptTimeout
 
 	if options.ResponseHeadersCallback != nil {
 		options.ResponseHeadersCallback(response.Header)
@@ -678,14 +683,15 @@ func (c *Conn) Subscribe(destination string, ack AckMode, opts ...func(*frame.Fr
 
 	closeMutex := &sync.Mutex{}
 	sub := &Subscription{
-		id:          id,
-		replyToSet:  replyToSet,
-		destination: destination,
-		conn:        c,
-		ackMode:     ack,
-		C:           make(chan *Message, 16),
-		closeMutex:  closeMutex,
-		closeCond:   sync.NewCond(closeMutex),
+		id:                        id,
+		replyToSet:                replyToSet,
+		destination:               destination,
+		conn:                      c,
+		ackMode:                   ack,
+		C:                         make(chan *Message, 16),
+		closeMutex:                closeMutex,
+		closeCond:                 sync.NewCond(closeMutex),
+		unsubscribeReceiptTimeout: c.unsubscribeReceiptTimeout,
 	}
 	go sub.readLoop(ch)
 

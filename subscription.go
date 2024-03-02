@@ -1,9 +1,11 @@
 package stomp
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/go-stomp/stomp/v3/frame"
 )
@@ -19,15 +21,16 @@ const (
 //
 // Once a client has subscribed, it can receive messages from the C channel.
 type Subscription struct {
-	C           chan *Message
-	id          string
-	replyToSet  bool
-	destination string
-	conn        *Conn
-	ackMode     AckMode
-	state       int32
-	closeMutex  *sync.Mutex
-	closeCond   *sync.Cond
+	C                         chan *Message
+	id                        string
+	replyToSet                bool
+	destination               string
+	conn                      *Conn
+	ackMode                   AckMode
+	state                     int32
+	closeMutex                *sync.Mutex
+	closeCond                 *sync.Cond
+	unsubscribeReceiptTimeout time.Duration
 }
 
 // BUG(jpj): If the client does not read messages from the Subscription.C
@@ -80,7 +83,12 @@ func (s *Subscription) Unsubscribe(opts ...func(*frame.Frame) error) error {
 		f.Header.Set(ReplyToHeader, s.id)
 	}
 
-	s.conn.sendFrame(f)
+	err := s.conn.sendFrame(f)
+	if errors.Is(err, ErrClosedUnexpectedly) {
+		msg := s.subscriptionErrorMessage("connection closed unexpectedly")
+		s.closeChannel(msg)
+		return err
+	}
 
 	// UNSUBSCRIBE is a bit weird in that it is tagged with a "receipt" header
 	// on the I/O goroutine, so the above call to sendFrame() will not wait
@@ -91,10 +99,33 @@ func (s *Subscription) Unsubscribe(opts ...func(*frame.Frame) error) error {
 	// wait for the terminal state transition instead.
 	s.closeMutex.Lock()
 	for atomic.LoadInt32(&s.state) != subStateClosed {
-		s.closeCond.Wait()
+		err = waitWithTimeout(s.closeCond, s.unsubscribeReceiptTimeout)
+		if err != nil && errors.Is(err, &ErrUnsubscribeReceiptTimeout) {
+			msg := s.subscriptionErrorMessage("channel unsubscribe receipt timeout")
+			s.C <- msg
+			return err
+		}
 	}
 	s.closeMutex.Unlock()
-	return nil
+	return err
+}
+
+func waitWithTimeout(cond *sync.Cond, timeout time.Duration) error {
+	if timeout == 0 {
+		cond.Wait()
+		return nil
+	}
+	waitChan := make(chan struct{})
+	go func() {
+		cond.Wait()
+		close(waitChan)
+	}()
+	select {
+	case <-waitChan:
+		return nil
+	case <-time.After(timeout):
+		return &ErrUnsubscribeReceiptTimeout
+	}
 }
 
 // Read a message from the subscription. This is a convenience
@@ -123,17 +154,21 @@ func (s *Subscription) closeChannel(msg *Message) {
 	s.closeCond.Broadcast()
 }
 
+func (s *Subscription) subscriptionErrorMessage(message string) *Message {
+	return &Message{
+		Err: &Error{
+			Message: fmt.Sprintf("Subscription %s: %s: %s", s.id, s.destination, message),
+		},
+	}
+}
+
 func (s *Subscription) readLoop(ch chan *frame.Frame) {
 	for {
 		f, ok := <-ch
 		if !ok {
 			state := atomic.LoadInt32(&s.state)
 			if state == subStateActive || state == subStateClosing {
-				msg := &Message{
-					Err: &Error{
-						Message: fmt.Sprintf("Subscription %s: %s: channel read failed", s.id, s.destination),
-					},
-				}
+				msg := s.subscriptionErrorMessage("channel read failed")
 				s.closeChannel(msg)
 			}
 			return
