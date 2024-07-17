@@ -51,8 +51,8 @@ type Conn struct {
 	closeMutex                *sync.Mutex
 	options                   *connOptions
 	log                       Logger
-	writesSent                *atomic.Int64
-	readsReceived             *atomic.Int64
+	writesSent                int64
+	readsReceived             int64
 }
 
 type writeRequest struct {
@@ -92,10 +92,8 @@ func Connect(conn io.ReadWriteCloser, opts ...func(*Conn) error) (*Conn, error) 
 	writer := frame.NewWriter(conn)
 
 	c := &Conn{
-		conn:          conn,
-		closeMutex:    &sync.Mutex{},
-		writesSent:    &atomic.Int64{},
-		readsReceived: &atomic.Int64{},
+		conn:       conn,
+		closeMutex: &sync.Mutex{},
 	}
 
 	options, err := newConnOptions(c, opts)
@@ -261,8 +259,8 @@ func (c *Conn) Stats() ConnectionStats {
 	return ConnectionStats{
 		CurrentWriteChanSize: len(c.writeCh),
 		CurrentReadChanSize:  len(c.readCh),
-		WritesSent:           c.writesSent.Load(),
-		ReadsReceived:        c.readsReceived.Load(),
+		WritesSent:           atomic.LoadInt64(&c.writesSent),
+		ReadsReceived:        atomic.LoadInt64(&c.readsReceived),
 	}
 }
 
@@ -276,7 +274,7 @@ func readLoop(c *Conn, reader *frame.Reader) {
 			close(c.readCh)
 			return
 		}
-		c.readsReceived.Add(1)
+		atomic.AddInt64(&c.readsReceived, 1)
 		c.readCh <- f
 	}
 }
@@ -461,7 +459,7 @@ func (c *Conn) Disconnect() error {
 		return nil
 	}
 
-	c.writesSent.Add(1)
+	atomic.AddInt64(&c.writesSent, 1)
 
 	ch := make(chan *frame.Frame)
 	c.writeCh <- writeRequest{
@@ -521,7 +519,7 @@ func (c *Conn) Send(destination, contentType string, body []byte, opts ...func(*
 		return err
 	}
 
-	c.writesSent.Add(1)
+	atomic.AddInt64(&c.writesSent, 1)
 
 	if _, ok := f.Header.Contains(frame.Receipt); ok {
 		// receipt required
@@ -618,7 +616,7 @@ func (c *Conn) sendFrame(f *frame.Frame) error {
 		return ErrClosedUnexpectedly
 	}
 
-	c.writesSent.Add(1)
+	atomic.AddInt64(&c.writesSent, 1)
 
 	if _, ok := f.Header.Contains(frame.Receipt); ok {
 		// receipt required
@@ -725,7 +723,7 @@ func (c *Conn) Subscribe(destination string, ack AckMode, opts ...func(*frame.Fr
 	}
 	go sub.readLoop(ch)
 
-	c.writesSent.Add(1)
+	atomic.AddInt64(&c.writesSent, 1)
 
 	// TODO is this safe? There is no check if writeCh is actually open.
 	c.writeCh <- request
