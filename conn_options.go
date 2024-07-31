@@ -198,6 +198,9 @@ var ConnOpt struct {
 
 	// Logger lets you provide a callback function that sets the logger used by a connection
 	Logger func(logger Logger) func(*Conn) error
+
+	// Enable statistical gathering for reading/writing messages from the server
+	WithStats func() func(*Conn) error
 }
 
 func init() {
@@ -335,6 +338,13 @@ func init() {
 				c.options.Logger = log
 			}
 
+			return nil
+		}
+	}
+
+	ConnOpt.WithStats = func() func(*Conn) error {
+		return func(conn *Conn) error {
+			conn.statsEnabled = true
 			return nil
 		}
 	}

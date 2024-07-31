@@ -53,6 +53,7 @@ type Conn struct {
 	log                       Logger
 	writesSent                int64
 	readsReceived             int64
+	statsEnabled              bool
 }
 
 type writeRequest struct {
@@ -274,7 +275,9 @@ func readLoop(c *Conn, reader *frame.Reader) {
 			close(c.readCh)
 			return
 		}
-		atomic.AddInt64(&c.readsReceived, 1)
+		if c.statsEnabled {
+			atomic.AddInt64(&c.readsReceived, 1)
+		}
 		c.readCh <- f
 	}
 }
@@ -459,7 +462,9 @@ func (c *Conn) Disconnect() error {
 		return nil
 	}
 
-	atomic.AddInt64(&c.writesSent, 1)
+	if c.statsEnabled {
+		atomic.AddInt64(&c.writesSent, 1)
+	}
 
 	ch := make(chan *frame.Frame)
 	c.writeCh <- writeRequest{
@@ -519,7 +524,9 @@ func (c *Conn) Send(destination, contentType string, body []byte, opts ...func(*
 		return err
 	}
 
-	atomic.AddInt64(&c.writesSent, 1)
+	if c.statsEnabled {
+		atomic.AddInt64(&c.writesSent, 1)
+	}
 
 	if _, ok := f.Header.Contains(frame.Receipt); ok {
 		// receipt required
@@ -616,7 +623,9 @@ func (c *Conn) sendFrame(f *frame.Frame) error {
 		return ErrClosedUnexpectedly
 	}
 
-	atomic.AddInt64(&c.writesSent, 1)
+	if c.statsEnabled {
+		atomic.AddInt64(&c.writesSent, 1)
+	}
 
 	if _, ok := f.Header.Contains(frame.Receipt); ok {
 		// receipt required
@@ -723,7 +732,9 @@ func (c *Conn) Subscribe(destination string, ack AckMode, opts ...func(*frame.Fr
 	}
 	go sub.readLoop(ch)
 
-	atomic.AddInt64(&c.writesSent, 1)
+	if c.statsEnabled {
+		atomic.AddInt64(&c.writesSent, 1)
+	}
 
 	// TODO is this safe? There is no check if writeCh is actually open.
 	c.writeCh <- request
