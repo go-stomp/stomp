@@ -6,6 +6,7 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-stomp/stomp/v3/frame"
@@ -50,6 +51,9 @@ type Conn struct {
 	closeMutex                *sync.Mutex
 	options                   *connOptions
 	log                       Logger
+	writesSent                int64
+	readsReceived             int64
+	statsEnabled              bool
 }
 
 type writeRequest struct {
@@ -243,6 +247,24 @@ func (c *Conn) Server() string {
 	return c.server
 }
 
+// ConnectionStats contains the statistics of a connection.
+// Retrieve via Connection.Stats()
+type ConnectionStats struct {
+	CurrentWriteChanSize int
+	CurrentReadChanSize  int
+	WritesSent           int64
+	ReadsReceived        int64
+}
+
+func (c *Conn) Stats() ConnectionStats {
+	return ConnectionStats{
+		CurrentWriteChanSize: len(c.writeCh),
+		CurrentReadChanSize:  len(c.readCh),
+		WritesSent:           atomic.LoadInt64(&c.writesSent),
+		ReadsReceived:        atomic.LoadInt64(&c.readsReceived),
+	}
+}
+
 // readLoop is a goroutine that reads frames from the
 // reader and places them onto a channel for processing
 // by the processLoop goroutine
@@ -252,6 +274,9 @@ func readLoop(c *Conn, reader *frame.Reader) {
 		if err != nil {
 			close(c.readCh)
 			return
+		}
+		if c.statsEnabled {
+			atomic.AddInt64(&c.readsReceived, 1)
 		}
 		c.readCh <- f
 	}
@@ -437,6 +462,10 @@ func (c *Conn) Disconnect() error {
 		return nil
 	}
 
+	if c.statsEnabled {
+		atomic.AddInt64(&c.writesSent, 1)
+	}
+
 	ch := make(chan *frame.Frame)
 	c.writeCh <- writeRequest{
 		Frame: frame.New(frame.DISCONNECT, frame.Receipt, allocateId()),
@@ -493,6 +522,10 @@ func (c *Conn) Send(destination, contentType string, body []byte, opts ...func(*
 	f, err := createSendFrame(destination, contentType, body, opts)
 	if err != nil {
 		return err
+	}
+
+	if c.statsEnabled {
+		atomic.AddInt64(&c.writesSent, 1)
 	}
 
 	if _, ok := f.Header.Contains(frame.Receipt); ok {
@@ -588,6 +621,10 @@ func (c *Conn) sendFrame(f *frame.Frame) error {
 		c.closeMutex.Unlock()
 		c.conn.Close()
 		return ErrClosedUnexpectedly
+	}
+
+	if c.statsEnabled {
+		atomic.AddInt64(&c.writesSent, 1)
 	}
 
 	if _, ok := f.Header.Contains(frame.Receipt); ok {
@@ -694,6 +731,10 @@ func (c *Conn) Subscribe(destination string, ack AckMode, opts ...func(*frame.Fr
 		unsubscribeReceiptTimeout: c.unsubscribeReceiptTimeout,
 	}
 	go sub.readLoop(ch)
+
+	if c.statsEnabled {
+		atomic.AddInt64(&c.writesSent, 1)
+	}
 
 	// TODO is this safe? There is no check if writeCh is actually open.
 	c.writeCh <- request

@@ -659,6 +659,10 @@ func (s *StompSuite) TestHeartBeatReadTimeout(c *C) {
 	msg, ok = <-sub.C
 	c.Assert(msg, IsNil)
 	c.Assert(ok, Equals, false)
+
+	stats := conn.Stats()
+	c.Assert(stats.WritesSent, Equals, int64(1))
+	c.Assert(stats.ReadsReceived, Equals, int64(1))
 }
 
 func (s *StompSuite) TestHeartBeatWriteTimeout(c *C) {
@@ -701,7 +705,8 @@ func createHeartBeatConnection(
 
 	conn, err := Connect(fc1,
 		ConnOpt.HeartBeat(time.Millisecond, time.Millisecond),
-		ConnOpt.HeartBeatError(readTimeoutError))
+		ConnOpt.HeartBeatError(readTimeoutError),
+		ConnOpt.WithStats())
 	c.Assert(conn, NotNil)
 	c.Assert(err, IsNil)
 	<-stop
