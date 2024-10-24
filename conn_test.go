@@ -1,6 +1,7 @@
 package stomp
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"time"
@@ -788,4 +789,21 @@ func (s *StompSuite) Test_ZeroTimeout(c *C) {
 	err := readReceiptWithTimeout(request.C, timeout, ErrMsgReceiptTimeout)
 
 	c.Assert(err, IsNil)
+}
+
+func (s *StompSuite) Test_ConnectWithContext(c *C) {
+	fc1, fc2 := testutil.NewFakeConn(c)
+
+	go func() {
+		buff := make([]byte, 1024)
+		fc2.Read(buff)
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
+
+	_, err := ConnectWithContext(ctx, fc1)
+	// the err here is "io timeout" because the server did not reply to any stomp message 
+	// and the connection waited longer than the 5 seconds we set
+	c.Assert(err, NotNil)
 }
