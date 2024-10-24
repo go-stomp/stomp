@@ -1,6 +1,7 @@
 package stomp
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net"
@@ -66,6 +67,10 @@ type writeRequest struct {
 // STOMP server is specified by network and addr. STOMP protocol
 // options can be specified in opts.
 func Dial(network, addr string, opts ...func(*Conn) error) (*Conn, error) {
+	return DialWithContext(context.Background(), network, addr, opts...)
+}
+
+func DialWithContext(ctx context.Context, network, addr string, opts ...func(*Conn) error) (*Conn, error) {
 	c, err := net.Dial(network, addr)
 	if err != nil {
 		return nil, err
@@ -81,7 +86,7 @@ func Dial(network, addr string, opts ...func(*Conn) error) (*Conn, error) {
 	// so that if host has been explicitly specified it will override.
 	opts = append([]func(*Conn) error{ConnOpt.Host(host)}, opts...)
 
-	return Connect(c, opts...)
+	return ConnectWithContext(ctx, c, opts...)
 }
 
 // Connect creates a STOMP connection and performs the STOMP connect
@@ -89,6 +94,10 @@ func Dial(network, addr string, opts ...func(*Conn) error) (*Conn, error) {
 // been created by the program. The opts parameter provides the
 // opportunity to specify STOMP protocol options.
 func Connect(conn io.ReadWriteCloser, opts ...func(*Conn) error) (*Conn, error) {
+	return ConnectWithContext(context.Background(), conn, opts...)
+}
+
+func ConnectWithContext(ctx context.Context, conn io.ReadWriteCloser, opts ...func(*Conn) error) (*Conn, error) {
 	reader := frame.NewReader(conn)
 	writer := frame.NewWriter(conn)
 
@@ -152,9 +161,17 @@ func Connect(conn io.ReadWriteCloser, opts ...func(*Conn) error) (*Conn, error) 
 		return nil, err
 	}
 
+	connection, isNetConn := conn.(net.Conn)
+	deadline, ok := ctx.Deadline()
+	if ok && isNetConn {
+		connection.SetReadDeadline(deadline)
+	}
 	response, err := reader.Read()
 	if err != nil {
 		return nil, err
+	}
+	if ok && isNetConn {
+		connection.SetReadDeadline(time.Time{})
 	}
 	if response == nil {
 		return nil, errors.New("unexpected empty frame")
