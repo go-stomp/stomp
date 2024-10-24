@@ -24,11 +24,12 @@ func (addr *FakeAddr) String() string {
 // the net.Conn interface and is useful for simulating I/O between
 // STOMP clients and a STOMP server.
 type FakeConn struct {
-	C          *C
-	writer     io.WriteCloser
-	reader     io.ReadCloser
-	localAddr  net.Addr
-	remoteAddr net.Addr
+	C            *C
+	writer       io.WriteCloser
+	reader       io.ReadCloser
+	localAddr    net.Addr
+	remoteAddr   net.Addr
+	readDeadline time.Time
 }
 
 var (
@@ -63,6 +64,10 @@ func NewFakeConn(c *C) (client *FakeConn, server *FakeConn) {
 }
 
 func (fc *FakeConn) Read(p []byte) (n int, err error) {
+	if !fc.readDeadline.IsZero() {
+		time.Sleep(fc.readDeadline.Sub(time.Now()))
+		return 0, errors.New("io timeout")
+	}
 	n, err = fc.reader.Read(p)
 	return
 }
@@ -105,7 +110,9 @@ func (fc *FakeConn) SetDeadline(t time.Time) error {
 }
 
 func (fc *FakeConn) SetReadDeadline(t time.Time) error {
-	panic("not implemented")
+	//panic("not implemented")
+	fc.readDeadline = t
+	return nil
 }
 
 func (fc *FakeConn) SetWriteDeadline(t time.Time) error {
