@@ -33,7 +33,8 @@ type FakeConn struct {
 }
 
 var (
-	ErrClosing = errors.New("use of closed network connection")
+	ErrClosing   = errors.New("use of closed network connection")
+	ErrIoTimeout = errors.New("io timeout")
 )
 
 // NewFakeConn returns a pair of fake connections suitable for
@@ -66,7 +67,7 @@ func NewFakeConn(c *C) (client *FakeConn, server *FakeConn) {
 func (fc *FakeConn) Read(p []byte) (n int, err error) {
 	if !fc.readDeadline.IsZero() {
 		time.Sleep(fc.readDeadline.Sub(time.Now()))
-		return 0, errors.New("io timeout")
+		return 0, ErrIoTimeout
 	}
 	n, err = fc.reader.Read(p)
 	return
