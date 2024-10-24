@@ -803,5 +803,7 @@ func (s *StompSuite) Test_ConnectWithContext(c *C) {
 	defer cancel()
 
 	_, err := ConnectWithContext(ctx, fc1)
+	// the err here is "io timeout" because the server did not reply to any stomp message 
+	// and the connection waited longer than the 5 seconds we set
 	c.Assert(err, NotNil)
 }
