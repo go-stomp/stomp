@@ -166,10 +166,12 @@ func ConnectWithContext(ctx context.Context, conn io.ReadWriteCloser, opts ...fu
 	if ok && isNetConn {
 		connection.SetReadDeadline(deadline)
 	}
+	
 	response, err := reader.Read()
 	if err != nil {
 		return nil, err
 	}
+	// Restore Conn-level deadlines
 	if ok && isNetConn {
 		connection.SetReadDeadline(time.Time{})
 	}
