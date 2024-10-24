@@ -111,7 +111,6 @@ func (fc *FakeConn) SetDeadline(t time.Time) error {
 }
 
 func (fc *FakeConn) SetReadDeadline(t time.Time) error {
-	//panic("not implemented")
 	fc.readDeadline = t
 	return nil
 }
