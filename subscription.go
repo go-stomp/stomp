@@ -102,8 +102,12 @@ func (s *Subscription) Unsubscribe(opts ...func(*frame.Frame) error) error {
 	for atomic.LoadInt32(&s.state) != subStateClosed {
 		err = waitWithTimeout(s.closeCond, s.unsubscribeReceiptTimeout)
 		if err != nil && errors.Is(err, &ErrUnsubscribeReceiptTimeout) {
-			msg := s.subscriptionErrorMessage("channel unsubscribe receipt timeout")
-			s.C <- msg
+			// The [closeCond.Broadcast] can race with the timeout, so make sure
+			// the channel is still available.
+			if atomic.LoadInt32(&s.state) != subStateClosed {
+				msg := s.subscriptionErrorMessage("channel unsubscribe receipt timeout")
+				s.C <- msg
+			}
 			return err
 		}
 	}
