@@ -4,13 +4,14 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"testing"
 	"time"
 
 	"github.com/go-stomp/stomp/v3/frame"
 	"github.com/go-stomp/stomp/v3/testutil"
+	"github.com/stretchr/testify/require"
 
 	"github.com/golang/mock/gomock"
-	. "gopkg.in/check.v1"
 )
 
 type fakeReaderWriter struct {
@@ -31,8 +32,8 @@ func (rw *fakeReaderWriter) Close() error {
 	return rw.conn.Close()
 }
 
-func (s *StompSuite) Test_conn_option_set_logger(c *C) {
-	fc1, fc2 := testutil.NewFakeConn(c)
+func TestStompConnOptionSetLogger(t *testing.T) {
+	fc1, fc2 := testutil.NewFakeConn(t)
 	go func() {
 
 		defer func() {
@@ -43,25 +44,25 @@ func (s *StompSuite) Test_conn_option_set_logger(c *C) {
 		reader := frame.NewReader(fc2)
 		writer := frame.NewWriter(fc2)
 		f1, err := reader.Read()
-		c.Assert(err, IsNil)
-		c.Assert(f1.Command, Equals, "CONNECT")
+		require.NoError(t, err)
+		require.Equal(t, "CONNECT", f1.Command)
 		f2 := frame.New("CONNECTED")
 		err = writer.Write(f2)
-		c.Assert(err, IsNil)
+		require.NoError(t, err)
 	}()
 
-	ctrl := gomock.NewController(s.t)
+	ctrl := gomock.NewController(t)
 	mockLogger := testutil.NewMockLogger(ctrl)
 
 	conn, err := Connect(fc1, ConnOpt.Logger(mockLogger))
-	c.Assert(err, IsNil)
-	c.Check(conn, NotNil)
+	require.NoError(t, err)
+	require.NotNil(t, conn)
 
-	c.Assert(conn.log, Equals, mockLogger)
+	require.Equal(t, mockLogger, conn.log)
 }
 
-func (s *StompSuite) Test_unsuccessful_connect(c *C) {
-	fc1, fc2 := testutil.NewFakeConn(c)
+func TestStompUnsuccessfulConnect(t *testing.T) {
+	fc1, fc2 := testutil.NewFakeConn(t)
 	stop := make(chan struct{})
 
 	go func() {
@@ -73,19 +74,19 @@ func (s *StompSuite) Test_unsuccessful_connect(c *C) {
 		reader := frame.NewReader(fc2)
 		writer := frame.NewWriter(fc2)
 		f1, err := reader.Read()
-		c.Assert(err, IsNil)
-		c.Assert(f1.Command, Equals, "CONNECT")
+		require.NoError(t, err)
+		require.Equal(t, "CONNECT", f1.Command)
 		f2 := frame.New("ERROR", "message", "auth-failed")
 		err = writer.Write(f2)
-		c.Assert(err, IsNil)
+		require.NoError(t, err)
 	}()
 
 	conn, err := Connect(fc1)
-	c.Assert(conn, IsNil)
-	c.Assert(err, ErrorMatches, "auth-failed")
+	require.Nil(t, conn)
+	require.Equal(t, "auth-failed", err.Error())
 }
 
-func (s *StompSuite) Test_successful_connect_and_disconnect(c *C) {
+func TestSuccessfulConnectAndDisconnect(t *testing.T) {
 	testcases := []struct {
 		Options           []func(*Conn) error
 		NegotiatedVersion string
@@ -119,7 +120,7 @@ func (s *StompSuite) Test_successful_connect_and_disconnect(c *C) {
 
 	for _, tc := range testcases {
 		resetId()
-		fc1, fc2 := testutil.NewFakeConn(c)
+		fc1, fc2 := testutil.NewFakeConn(t)
 		stop := make(chan struct{})
 
 		go func() {
@@ -131,10 +132,10 @@ func (s *StompSuite) Test_successful_connect_and_disconnect(c *C) {
 			writer := frame.NewWriter(fc2)
 
 			f1, err := reader.Read()
-			c.Assert(err, IsNil)
-			c.Assert(f1.Command, Equals, "CONNECT")
+			require.NoError(t, err)
+			require.Equal(t, "CONNECT", f1.Command)
 			host, _ := f1.Header.Contains("host")
-			c.Check(host, Equals, tc.ExpectedHost)
+			require.Equal(t, tc.ExpectedHost, host)
 			connectedFrame := frame.New("CONNECTED")
 			if tc.NegotiatedVersion != "" {
 				connectedFrame.Header.Add("version", tc.NegotiatedVersion)
@@ -146,34 +147,34 @@ func (s *StompSuite) Test_successful_connect_and_disconnect(c *C) {
 				connectedFrame.Header.Add("server", tc.ExpectedServer)
 			}
 			err = writer.Write(connectedFrame)
-			c.Assert(err, IsNil)
+			require.NoError(t, err)
 
 			f2, err := reader.Read()
-			c.Assert(err, IsNil)
-			c.Assert(f2.Command, Equals, "DISCONNECT")
+			require.NoError(t, err)
+			require.Equal(t, "DISCONNECT", f2.Command)
 			receipt, _ := f2.Header.Contains("receipt")
-			c.Check(receipt, Equals, "1")
+			require.Equal(t, "1", receipt)
 
 			err = writer.Write(frame.New("RECEIPT", frame.ReceiptId, "1"))
-			c.Assert(err, IsNil)
+			require.NoError(t, err)
 
 		}()
 
 		client, err := Connect(fc1, tc.Options...)
-		c.Assert(err, IsNil)
-		c.Assert(client, NotNil)
-		c.Assert(client.Version(), Equals, tc.ExpectedVersion)
-		c.Assert(client.Session(), Equals, tc.ExpectedSession)
-		c.Assert(client.Server(), Equals, tc.ExpectedServer)
+		require.NoError(t, err)
+		require.NotNil(t, client)
+		require.Equal(t, tc.ExpectedVersion, client.Version())
+		require.Equal(t, tc.ExpectedSession, client.Session())
+		require.Equal(t, tc.ExpectedServer, client.Server())
 
 		err = client.Disconnect()
-		c.Assert(err, IsNil)
+		require.NoError(t, err)
 
 		<-stop
 	}
 }
 
-func (s *StompSuite) Test_successful_connect_get_headers(c *C) {
+func TestStompSuccessfulConnectGetHeaders(t *testing.T) {
 	var respHeaders *frame.Header
 
 	testcases := []struct {
@@ -188,7 +189,7 @@ func (s *StompSuite) Test_successful_connect_get_headers(c *C) {
 
 	for _, tc := range testcases {
 		resetId()
-		fc1, fc2 := testutil.NewFakeConn(c)
+		fc1, fc2 := testutil.NewFakeConn(t)
 		stop := make(chan struct{})
 
 		go func() {
@@ -200,43 +201,43 @@ func (s *StompSuite) Test_successful_connect_get_headers(c *C) {
 			writer := frame.NewWriter(fc2)
 
 			f1, err := reader.Read()
-			c.Assert(err, IsNil)
-			c.Assert(f1.Command, Equals, "CONNECT")
+			require.NoError(t, err)
+			require.Equal(t, "CONNECT", f1.Command)
 			connectedFrame := frame.New("CONNECTED")
 			for key, value := range tc.Headers {
 				connectedFrame.Header.Add(key, value)
 			}
 			err = writer.Write(connectedFrame)
-			c.Assert(err, IsNil)
+			require.NoError(t, err)
 
 			f2, err := reader.Read()
-			c.Assert(err, IsNil)
-			c.Assert(f2.Command, Equals, "DISCONNECT")
+			require.NoError(t, err)
+			require.Equal(t, "DISCONNECT", f2.Command)
 			receipt, _ := f2.Header.Contains("receipt")
-			c.Check(receipt, Equals, "1")
+			require.Equal(t, "1", receipt)
 
 			err = writer.Write(frame.New("RECEIPT", frame.ReceiptId, "1"))
-			c.Assert(err, IsNil)
+			require.NoError(t, err)
 
 		}()
 
 		client, err := Connect(fc1, tc.Options...)
-		c.Assert(err, IsNil)
-		c.Assert(client, NotNil)
-		c.Assert(respHeaders, NotNil)
+		require.NoError(t, err)
+		require.NotNil(t, client)
+		require.NotNil(t, respHeaders)
 		for key, value := range tc.Headers {
-			c.Assert(respHeaders.Get(key), Equals, value)
+			require.Equal(t, value, respHeaders.Get(key))
 		}
 		err = client.Disconnect()
-		c.Assert(err, IsNil)
+		require.NoError(t, err)
 
 		<-stop
 	}
 }
 
-func (s *StompSuite) Test_successful_connect_with_nonstandard_header(c *C) {
+func TestStompSuccessfulConnectWithNonstandardHeader(t *testing.T) {
 	resetId()
-	fc1, fc2 := testutil.NewFakeConn(c)
+	fc1, fc2 := testutil.NewFakeConn(t)
 	stop := make(chan struct{})
 
 	go func() {
@@ -248,49 +249,49 @@ func (s *StompSuite) Test_successful_connect_with_nonstandard_header(c *C) {
 		writer := frame.NewWriter(fc2)
 
 		f1, err := reader.Read()
-		c.Assert(err, IsNil)
-		c.Assert(f1.Command, Equals, "CONNECT")
-		c.Assert(f1.Header.Get("login"), Equals, "guest")
-		c.Assert(f1.Header.Get("passcode"), Equals, "guest")
-		c.Assert(f1.Header.Get("host"), Equals, "/")
-		c.Assert(f1.Header.Get("x-max-length"), Equals, "50")
+		require.NoError(t, err)
+		require.Equal(t, "CONNECT", f1.Command)
+		require.Equal(t, "guest", f1.Header.Get("login"))
+		require.Equal(t, "guest", f1.Header.Get("passcode"))
+		require.Equal(t, "/", f1.Header.Get("host"))
+		require.Equal(t, "50", f1.Header.Get("x-max-length"))
 		connectedFrame := frame.New("CONNECTED")
 		connectedFrame.Header.Add("session", "session-0voRHrG-VbBedx1Gwwb62Q")
 		connectedFrame.Header.Add("heart-beat", "0,0")
 		connectedFrame.Header.Add("server", "RabbitMQ/3.2.1")
 		connectedFrame.Header.Add("version", "1.0")
 		err = writer.Write(connectedFrame)
-		c.Assert(err, IsNil)
+		require.NoError(t, err)
 
 		f2, err := reader.Read()
-		c.Assert(err, IsNil)
-		c.Assert(f2.Command, Equals, "DISCONNECT")
+		require.NoError(t, err)
+		require.Equal(t, "DISCONNECT", f2.Command)
 		receipt, _ := f2.Header.Contains("receipt")
-		c.Check(receipt, Equals, "1")
+		require.Equal(t, "1", receipt)
 
 		err = writer.Write(frame.New("RECEIPT", frame.ReceiptId, "1"))
-		c.Assert(err, IsNil)
+		require.NoError(t, err)
 	}()
 
 	client, err := Connect(fc1,
 		ConnOpt.Login("guest", "guest"),
 		ConnOpt.Host("/"),
 		ConnOpt.Header("x-max-length", "50"))
-	c.Assert(err, IsNil)
-	c.Assert(client, NotNil)
-	c.Assert(client.Version(), Equals, V10)
-	c.Assert(client.Session(), Equals, "session-0voRHrG-VbBedx1Gwwb62Q")
-	c.Assert(client.Server(), Equals, "RabbitMQ/3.2.1")
+	require.NoError(t, err)
+	require.NotNil(t, client)
+	require.Equal(t, V10, client.Version())
+	require.Equal(t, "session-0voRHrG-VbBedx1Gwwb62Q", client.Session())
+	require.Equal(t, "RabbitMQ/3.2.1", client.Server())
 
 	err = client.Disconnect()
-	c.Assert(err, IsNil)
+	require.NotNil(t, client)
 
 	<-stop
 }
 
-func (s *StompSuite) Test_connect_not_panic_on_empty_response(c *C) {
+func TestStompConnectNotPanicOnEmptyResponse(t *testing.T) {
 	resetId()
-	fc1, fc2 := testutil.NewFakeConn(c)
+	fc1, fc2 := testutil.NewFakeConn(t)
 	stop := make(chan struct{})
 
 	go func() {
@@ -300,22 +301,22 @@ func (s *StompSuite) Test_connect_not_panic_on_empty_response(c *C) {
 		}()
 		reader := frame.NewReader(fc2)
 		_, err := reader.Read()
-		c.Assert(err, IsNil)
+		require.NoError(t, err)
 		_, err = fc2.Write([]byte("\n"))
-		c.Assert(err, IsNil)
+		require.NoError(t, err)
 	}()
 
 	client, err := Connect(fc1, ConnOpt.Host("the_server"))
-	c.Assert(err, NotNil)
-	c.Assert(client, IsNil)
+	require.Error(t, err)
+	require.Nil(t, client)
 
 	fc1.Close()
 	<-stop
 }
 
-func (s *StompSuite) Test_successful_disconnect_with_receipt_timeout(c *C) {
+func TestSuccessfulDisconnectWithReceiptTimeout(t *testing.T) {
 	resetId()
-	fc1, fc2 := testutil.NewFakeConn(c)
+	fc1, fc2 := testutil.NewFakeConn(t)
 
 	defer func() {
 		fc2.Close()
@@ -326,25 +327,25 @@ func (s *StompSuite) Test_successful_disconnect_with_receipt_timeout(c *C) {
 		writer := frame.NewWriter(fc2)
 
 		f1, err := reader.Read()
-		c.Assert(err, IsNil)
-		c.Assert(f1.Command, Equals, "CONNECT")
+		require.NoError(t, err)
+		require.Equal(t, "CONNECT", f1.Command)
 		connectedFrame := frame.New("CONNECTED")
 		err = writer.Write(connectedFrame)
-		c.Assert(err, IsNil)
+		require.NoError(t, err)
 	}()
 
-	client, err := Connect(fc1, ConnOpt.DisconnectReceiptTimeout(1 * time.Nanosecond))
-	c.Assert(err, IsNil)
-	c.Assert(client, NotNil)
+	client, err := Connect(fc1, ConnOpt.DisconnectReceiptTimeout(1*time.Nanosecond))
+	require.NoError(t, err)
+	require.NotNil(t, client)
 
 	err = client.Disconnect()
-	c.Assert(err, Equals, ErrDisconnectReceiptTimeout)
-	c.Assert(client.closed, Equals, true)
+	require.ErrorIs(t, err, ErrDisconnectReceiptTimeout)
+	require.True(t, client.closed)
 }
 
 // Sets up a connection for testing
-func connectHelper(c *C, version Version) (*Conn, *fakeReaderWriter) {
-	fc1, fc2 := testutil.NewFakeConn(c)
+func connectHelper(t testing.TB, version Version) (*Conn, *fakeReaderWriter) {
+	fc1, fc2 := testutil.NewFakeConn(t)
 	stop := make(chan struct{})
 
 	reader := frame.NewReader(fc2)
@@ -352,17 +353,17 @@ func connectHelper(c *C, version Version) (*Conn, *fakeReaderWriter) {
 
 	go func() {
 		f1, err := reader.Read()
-		c.Assert(err, IsNil)
-		c.Assert(f1.Command, Equals, "CONNECT")
+		require.NoError(t, err)
+		require.Equal(t, "CONNECT", f1.Command)
 		f2 := frame.New("CONNECTED", "version", version.String())
 		err = writer.Write(f2)
-		c.Assert(err, IsNil)
+		require.NoError(t, err)
 		close(stop)
 	}()
 
 	conn, err := Connect(fc1)
-	c.Assert(err, IsNil)
-	c.Assert(conn, NotNil)
+	require.NoError(t, err)
+	require.NotNil(t, conn)
 	<-stop
 	return conn, &fakeReaderWriter{
 		reader: reader,
@@ -371,22 +372,22 @@ func connectHelper(c *C, version Version) (*Conn, *fakeReaderWriter) {
 	}
 }
 
-func (s *StompSuite) Test_subscribe(c *C) {
+func TestStompSubscribe(t *testing.T) {
 	ackModes := []AckMode{AckAuto, AckClient, AckClientIndividual}
 	versions := []Version{V10, V11, V12}
 
 	for _, ackMode := range ackModes {
 		for _, version := range versions {
-			subscribeHelper(c, ackMode, version)
-			subscribeHelper(c, ackMode, version,
+			subscribeHelper(t, ackMode, version)
+			subscribeHelper(t, ackMode, version,
 				SubscribeOpt.Header("id", "client-1"),
 				SubscribeOpt.Header("custom", "true"))
 		}
 	}
 }
 
-func subscribeHelper(c *C, ackMode AckMode, version Version, opts ...func(*frame.Frame) error) {
-	conn, rw := connectHelper(c, version)
+func subscribeHelper(t testing.TB, ackMode AckMode, version Version, opts ...func(*frame.Frame) error) {
+	conn, rw := connectHelper(t, version)
 	stop := make(chan struct{})
 
 	go func() {
@@ -396,16 +397,16 @@ func subscribeHelper(c *C, ackMode AckMode, version Version, opts ...func(*frame
 		}()
 
 		f3, err := rw.Read()
-		c.Assert(err, IsNil)
-		c.Assert(f3.Command, Equals, "SUBSCRIBE")
+		require.NoError(t, err)
+		require.Equal(t, "SUBSCRIBE", f3.Command)
 
 		id, ok := f3.Header.Contains("id")
-		c.Assert(ok, Equals, true)
+		require.True(t, ok)
 
 		destination := f3.Header.Get("destination")
-		c.Assert(destination, Equals, "/queue/test-1")
+		require.Equal(t, "/queue/test-1", destination)
 		ack := f3.Header.Get("ack")
-		c.Assert(ack, Equals, ackMode.String())
+		require.Equal(t, ackMode.String(), ack)
 
 		for i := 1; i <= 5; i++ {
 			messageId := fmt.Sprintf("message-%d", i)
@@ -419,67 +420,67 @@ func subscribeHelper(c *C, ackMode AckMode, version Version, opts ...func(*frame
 			}
 			f4.Body = []byte(bodyText)
 			err = rw.Write(f4)
-			c.Assert(err, IsNil)
+			require.NoError(t, err)
 
 			if ackMode.ShouldAck() {
 				f5, _ := rw.Read()
-				c.Assert(f5.Command, Equals, "ACK")
+				require.Equal(t, "ACK", f5.Command)
 				if version == V12 {
-					c.Assert(f5.Header.Get(frame.Id), Equals, messageId)
+					require.Equal(t, messageId, f5.Header.Get(frame.Id))
 				} else {
-					c.Assert(f5.Header.Get("subscription"), Equals, id)
-					c.Assert(f5.Header.Get("message-id"), Equals, messageId)
+					require.Equal(t, id, f5.Header.Get("subscription"))
+					require.Equal(t, messageId, f5.Header.Get("message-id"))
 				}
 			}
 		}
 
 		f6, _ := rw.Read()
-		c.Assert(f6.Command, Equals, "UNSUBSCRIBE")
-		c.Assert(f6.Header.Get(frame.Receipt), Not(Equals), "")
-		c.Assert(f6.Header.Get(frame.Id), Equals, id)
+		require.Equal(t, "UNSUBSCRIBE", f6.Command)
+		require.NotEqual(t, "", f6.Header.Get(frame.Receipt))
+		require.Equal(t, id, f6.Header.Get(frame.Id))
 		err = rw.Write(frame.New(frame.RECEIPT, frame.ReceiptId, f6.Header.Get(frame.Receipt)))
-		c.Assert(err, IsNil)
+		require.NoError(t, err)
 
 		f7, _ := rw.Read()
-		c.Assert(f7.Command, Equals, "DISCONNECT")
+		require.Equal(t, "DISCONNECT", f7.Command)
 		err = rw.Write(frame.New(frame.RECEIPT, frame.ReceiptId, f7.Header.Get(frame.Receipt)))
-		c.Assert(err, IsNil)
+		require.NoError(t, err)
 	}()
 
 	var sub *Subscription
 	var err error
 	sub, err = conn.Subscribe("/queue/test-1", ackMode, opts...)
 
-	c.Assert(sub, NotNil)
-	c.Assert(err, IsNil)
+	require.NoError(t, err)
+	require.NotNil(t, sub)
 
 	for i := 1; i <= 5; i++ {
 		msg := <-sub.C
 		messageId := fmt.Sprintf("message-%d", i)
 		bodyText := fmt.Sprintf("Message body %d", i)
-		c.Assert(msg.Subscription, Equals, sub)
-		c.Assert(msg.Body, DeepEquals, []byte(bodyText))
-		c.Assert(msg.Destination, Equals, "/queue/test-1")
-		c.Assert(msg.Header.Get(frame.MessageId), Equals, messageId)
+		require.Equal(t, sub, msg.Subscription)
+		require.Equal(t, []byte(bodyText), msg.Body)
+		require.Equal(t, "/queue/test-1", msg.Destination)
+		require.Equal(t, messageId, msg.Header.Get(frame.MessageId))
 		if version == V12 && ackMode.ShouldAck() {
-			c.Assert(msg.Header.Get(frame.Ack), Equals, messageId)
+			require.Equal(t, messageId, msg.Header.Get(frame.Ack))
 		}
 
-		c.Assert(msg.ShouldAck(), Equals, ackMode.ShouldAck())
+		require.Equal(t, ackMode.ShouldAck(), msg.ShouldAck())
 		if msg.ShouldAck() {
 			err = msg.Conn.Ack(msg)
-			c.Assert(err, IsNil)
+			require.NoError(t, err)
 		}
 	}
 
 	err = sub.Unsubscribe(SubscribeOpt.Header("custom", "true"))
-	c.Assert(err, IsNil)
+	require.NoError(t, err)
 
 	err = conn.Disconnect()
-	c.Assert(err, IsNil)
+	require.NoError(t, err)
 }
 
-func (s *StompSuite) TestTransaction(c *C) {
+func TestStompTransaction(t *testing.T) {
 
 	ackModes := []AckMode{AckAuto, AckClient, AckClientIndividual}
 	versions := []Version{V10, V11, V12}
@@ -490,15 +491,15 @@ func (s *StompSuite) TestTransaction(c *C) {
 		for _, version := range versions {
 			for _, abort := range aborts {
 				for _, nack := range nacks {
-					subscribeTransactionHelper(c, ackMode, version, abort, nack)
+					subscribeTransactionHelper(t, ackMode, version, abort, nack)
 				}
 			}
 		}
 	}
 }
 
-func subscribeTransactionHelper(c *C, ackMode AckMode, version Version, abort bool, nack bool) {
-	conn, rw := connectHelper(c, version)
+func subscribeTransactionHelper(t *testing.T, ackMode AckMode, version Version, abort bool, nack bool) {
+	conn, rw := connectHelper(t, version)
 	stop := make(chan struct{})
 
 	go func() {
@@ -508,14 +509,14 @@ func subscribeTransactionHelper(c *C, ackMode AckMode, version Version, abort bo
 		}()
 
 		f3, err := rw.Read()
-		c.Assert(err, IsNil)
-		c.Assert(f3.Command, Equals, "SUBSCRIBE")
+		require.NoError(t, err)
+		require.Equal(t, "SUBSCRIBE", f3.Command)
 		id, ok := f3.Header.Contains("id")
-		c.Assert(ok, Equals, true)
+		require.True(t, ok)
 		destination := f3.Header.Get("destination")
-		c.Assert(destination, Equals, "/queue/test-1")
+		require.Equal(t, "/queue/test-1", destination)
 		ack := f3.Header.Get("ack")
-		c.Assert(ack, Equals, ackMode.String())
+		require.Equal(t, ackMode.String(), ack)
 
 		for i := 1; i <= 5; i++ {
 			messageId := fmt.Sprintf("message-%d", i)
@@ -529,164 +530,164 @@ func subscribeTransactionHelper(c *C, ackMode AckMode, version Version, abort bo
 			}
 			f4.Body = []byte(bodyText)
 			err = rw.Write(f4)
-			c.Assert(err, IsNil)
+			require.NoError(t, err)
 
 			beginFrame, err := rw.Read()
-			c.Assert(err, IsNil)
-			c.Assert(beginFrame, NotNil)
-			c.Check(beginFrame.Command, Equals, "BEGIN")
+			require.NoError(t, err)
+			require.NotNil(t, beginFrame)
+			require.Equal(t, "BEGIN", beginFrame.Command)
 			tx, ok := beginFrame.Header.Contains(frame.Transaction)
 
-			c.Assert(ok, Equals, true)
+			require.True(t, ok)
 
 			if ackMode.ShouldAck() {
 				f5, _ := rw.Read()
 				if nack && version.SupportsNack() {
-					c.Assert(f5.Command, Equals, "NACK")
+					require.Equal(t, "NACK", f5.Command)
 				} else {
-					c.Assert(f5.Command, Equals, "ACK")
+					require.Equal(t, "ACK", f5.Command)
 				}
 				if version == V12 {
-					c.Assert(f5.Header.Get(frame.Id), Equals, messageId)
+					require.Equal(t, messageId, f5.Header.Get(frame.Id))
 				} else {
-					c.Assert(f5.Header.Get("subscription"), Equals, id)
-					c.Assert(f5.Header.Get("message-id"), Equals, messageId)
+					require.Equal(t, id, f5.Header.Get("subscription"))
+					require.Equal(t, messageId, f5.Header.Get("message-id"))
 				}
-				c.Assert(f5.Header.Get("transaction"), Equals, tx)
+				require.Equal(t, tx, f5.Header.Get("transaction"))
 			}
 
 			sendFrame, _ := rw.Read()
-			c.Assert(sendFrame, NotNil)
-			c.Assert(sendFrame.Command, Equals, "SEND")
-			c.Assert(sendFrame.Header.Get("transaction"), Equals, tx)
+			require.NotNil(t, sendFrame)
+			require.Equal(t, "SEND", sendFrame.Command)
+			require.Equal(t, tx, sendFrame.Header.Get("transaction"))
 
 			commitFrame, _ := rw.Read()
-			c.Assert(commitFrame, NotNil)
+			require.NotNil(t, commitFrame)
 			if abort {
-				c.Assert(commitFrame.Command, Equals, "ABORT")
+				require.Equal(t, "ABORT", commitFrame.Command)
 			} else {
-				c.Assert(commitFrame.Command, Equals, "COMMIT")
+				require.Equal(t, "COMMIT", commitFrame.Command)
 			}
-			c.Assert(commitFrame.Header.Get("transaction"), Equals, tx)
+			require.Equal(t, tx, commitFrame.Header.Get("transaction"))
 		}
 
 		f6, _ := rw.Read()
-		c.Assert(f6.Command, Equals, "UNSUBSCRIBE")
-		c.Assert(f6.Header.Get(frame.Receipt), Not(Equals), "")
-		c.Assert(f6.Header.Get(frame.Id), Equals, id)
+		require.Equal(t, "UNSUBSCRIBE", f6.Command)
+		require.NotEqual(t, "", f6.Header.Get(frame.Receipt))
+		require.Equal(t, id, f6.Header.Get(frame.Id))
 		err = rw.Write(frame.New(frame.RECEIPT, frame.ReceiptId, f6.Header.Get(frame.Receipt)))
-		c.Assert(err, IsNil)
+		require.NoError(t, err)
 
 		f7, _ := rw.Read()
-		c.Assert(f7.Command, Equals, "DISCONNECT")
+		require.Equal(t, "DISCONNECT", f7.Command)
 		err = rw.Write(frame.New(frame.RECEIPT, frame.ReceiptId, f7.Header.Get(frame.Receipt)))
-		c.Assert(err, IsNil)
+		require.NoError(t, err)
 	}()
 
 	sub, err := conn.Subscribe("/queue/test-1", ackMode)
-	c.Assert(sub, NotNil)
-	c.Assert(err, IsNil)
+	require.NoError(t, err)
+	require.NotNil(t, sub)
 
 	for i := 1; i <= 5; i++ {
 		msg := <-sub.C
 		messageId := fmt.Sprintf("message-%d", i)
 		bodyText := fmt.Sprintf("Message body %d", i)
-		c.Assert(msg.Subscription, Equals, sub)
-		c.Assert(msg.Body, DeepEquals, []byte(bodyText))
-		c.Assert(msg.Destination, Equals, "/queue/test-1")
-		c.Assert(msg.Header.Get(frame.MessageId), Equals, messageId)
+		require.Equal(t, sub, msg.Subscription)
+		require.Equal(t, []byte(bodyText), msg.Body)
+		require.Equal(t, "/queue/test-1", msg.Destination)
+		require.Equal(t, messageId, msg.Header.Get(frame.MessageId))
 
-		c.Assert(msg.ShouldAck(), Equals, ackMode.ShouldAck())
+		require.Equal(t, ackMode.ShouldAck(), msg.ShouldAck())
 		tx := msg.Conn.Begin()
-		c.Assert(tx.Id(), Not(Equals), "")
+		require.NotEqual(t, "", tx.Id())
 		if msg.ShouldAck() {
 			if nack && version.SupportsNack() {
 				err = tx.Nack(msg)
-				c.Assert(err, IsNil)
+				require.NoError(t, err)
 			} else {
 				err = tx.Ack(msg)
-				c.Assert(err, IsNil)
+				require.NoError(t, err)
 			}
 		}
 		err = tx.Send("/queue/another-queue", "text/plain", []byte(bodyText))
-		c.Assert(err, IsNil)
+		require.NoError(t, err)
 		if abort {
 			err = tx.Abort()
-			c.Assert(err, IsNil)
+			require.NoError(t, err)
 		} else {
 			err = tx.Commit()
-			c.Assert(err, IsNil)
+			require.NoError(t, err)
 		}
 	}
 
 	err = sub.Unsubscribe()
-	c.Assert(err, IsNil)
+	require.NoError(t, err)
 
 	err = conn.Disconnect()
-	c.Assert(err, IsNil)
+	require.NoError(t, err)
 }
 
-func (s *StompSuite) TestHeartBeatReadTimeout(c *C) {
-	conn, rw := createHeartBeatConnection(c, 100, 10000, time.Millisecond)
+func TestStompHeartBeatReadTimeout(t *testing.T) {
+	conn, rw := createHeartBeatConnection(t, 100, 10000, time.Millisecond)
 
 	go func() {
 		f1, err := rw.Read()
-		c.Assert(err, IsNil)
-		c.Assert(f1.Command, Equals, "SUBSCRIBE")
+		require.NoError(t, err)
+		require.Equal(t, "SUBSCRIBE", f1.Command)
 		messageFrame := frame.New("MESSAGE",
 			"destination", f1.Header.Get("destination"),
 			"message-id", "1",
 			"subscription", f1.Header.Get("id"))
 		messageFrame.Body = []byte("Message body")
 		err = rw.Write(messageFrame)
-		c.Assert(err, IsNil)
+		require.NoError(t, err)
 	}()
 
 	sub, err := conn.Subscribe("/queue/test1", AckAuto)
-	c.Assert(err, IsNil)
-	c.Check(conn.readTimeout, Equals, 101*time.Millisecond)
+	require.NoError(t, err)
+	require.Equal(t, 101*time.Millisecond, conn.readTimeout)
 	//println("read timeout", conn.readTimeout.String())
 
 	msg, ok := <-sub.C
-	c.Assert(msg, NotNil)
-	c.Assert(ok, Equals, true)
+	require.NotNil(t, msg)
+	require.True(t, ok)
 
 	msg, ok = <-sub.C
-	c.Assert(msg, NotNil)
-	c.Assert(ok, Equals, true)
-	c.Assert(msg.Err, NotNil)
-	c.Assert(msg.Err.Error(), Equals, "read timeout")
+	require.NotNil(t, msg)
+	require.True(t, ok)
+	require.Error(t, msg.Err)
+	require.Equal(t, "read timeout", msg.Err.Error())
 
 	msg, ok = <-sub.C
-	c.Assert(msg, IsNil)
-	c.Assert(ok, Equals, false)
+	require.Nil(t, msg)
+	require.False(t, ok)
 
 	stats := conn.Stats()
-	c.Assert(stats.WritesSent, Equals, int64(1))
-	c.Assert(stats.ReadsReceived, Equals, int64(1))
+	require.Equal(t, int64(1), stats.WritesSent)
+	require.Equal(t, int64(1), stats.ReadsReceived)
 }
 
-func (s *StompSuite) TestHeartBeatWriteTimeout(c *C) {
-	c.Skip("not finished yet")
-	conn, rw := createHeartBeatConnection(c, 10000, 100, time.Millisecond*1)
+func TestStompHeartBeatWriteTimeout(t *testing.T) {
+	t.Skip("not finished yet")
+	conn, rw := createHeartBeatConnection(t, 10000, 100, time.Millisecond*1)
 
 	go func() {
 		f1, err := rw.Read()
-		c.Assert(err, IsNil)
-		c.Assert(f1, IsNil)
+		require.NoError(t, err)
+		require.Nil(t, f1)
 
 	}()
 
 	time.Sleep(250)
 	err := conn.Disconnect()
-	c.Assert(err, IsNil)
+	require.NoError(t, err)
 }
 
 func createHeartBeatConnection(
-	c *C,
+	t testing.TB,
 	readTimeout, writeTimeout int,
 	readTimeoutError time.Duration) (*Conn, *fakeReaderWriter) {
-	fc1, fc2 := testutil.NewFakeConn(c)
+	fc1, fc2 := testutil.NewFakeConn(t)
 	stop := make(chan struct{})
 
 	reader := frame.NewReader(fc2)
@@ -694,13 +695,13 @@ func createHeartBeatConnection(
 
 	go func() {
 		f1, err := reader.Read()
-		c.Assert(err, IsNil)
-		c.Assert(f1.Command, Equals, "CONNECT")
-		c.Assert(f1.Header.Get("heart-beat"), Equals, "1,1")
+		require.NoError(t, err)
+		require.Equal(t, "CONNECT", f1.Command)
+		require.Equal(t, "1,1", f1.Header.Get("heart-beat"))
 		f2 := frame.New("CONNECTED", "version", "1.2")
 		f2.Header.Add("heart-beat", fmt.Sprintf("%d,%d", readTimeout, writeTimeout))
 		err = writer.Write(f2)
-		c.Assert(err, IsNil)
+		require.NoError(t, err)
 		close(stop)
 	}()
 
@@ -708,8 +709,8 @@ func createHeartBeatConnection(
 		ConnOpt.HeartBeat(time.Millisecond, time.Millisecond),
 		ConnOpt.HeartBeatError(readTimeoutError),
 		ConnOpt.WithStats())
-	c.Assert(conn, NotNil)
-	c.Assert(err, IsNil)
+	require.NoError(t, err)
+	require.NotNil(t, conn)
 	<-stop
 	return conn, &fakeReaderWriter{
 		reader: reader,
@@ -723,8 +724,7 @@ func sendFrameHelper(f *frame.Frame, c chan *frame.Frame) {
 	c <- f
 }
 
-//// GIVEN_TheTimeoutIsExceededBeforeTheReceiptIsReceived_WHEN_CallingReadReceiptWithTimeout_THEN_ReturnAnError
-func (s *StompSuite) Test_TimeoutTriggers(c *C) {
+func TestStompTimeoutTriggers(t *testing.T) {
 	const timeout = 1 * time.Millisecond
 	f := frame.Frame{}
 	request := writeRequest{
@@ -734,11 +734,10 @@ func (s *StompSuite) Test_TimeoutTriggers(c *C) {
 
 	err := readReceiptWithTimeout(request.C, timeout, ErrMsgReceiptTimeout)
 
-	c.Assert(err, NotNil)
+	require.Error(t, err)
 }
 
-//// GIVEN_TheChannelReceivesTheReceiptBeforeTheTimeoutExpires_WHEN_CallingReadReceiptWithTimeout_THEN_DoNotReturnAnError
-func (s *StompSuite) Test_ChannelReceviesReceipt(c *C) {
+func TestStompChannelReceviesReceipt(t *testing.T) {
 	const timeout = 1 * time.Second
 	f := frame.Frame{}
 	request := writeRequest{
@@ -752,11 +751,10 @@ func (s *StompSuite) Test_ChannelReceviesReceipt(c *C) {
 	go sendFrameHelper(&receipt, request.C)
 	err := readReceiptWithTimeout(request.C, timeout, ErrMsgReceiptTimeout)
 
-	c.Assert(err, IsNil)
+	require.NoError(t, err)
 }
 
-//// GIVEN_TheChannelReceivesMessage_AND_TheMessageIsNotAReceipt_WHEN_CallingReadReceiptWithTimeout_THEN_ReturnAnError
-func (s *StompSuite) Test_ChannelReceviesNonReceipt(c *C) {
+func TestStompChannelReceviesNonReceipt(t *testing.T) {
 	const timeout = 1 * time.Second
 	f := frame.Frame{}
 	request := writeRequest{
@@ -770,11 +768,10 @@ func (s *StompSuite) Test_ChannelReceviesNonReceipt(c *C) {
 	go sendFrameHelper(&receipt, request.C)
 	err := readReceiptWithTimeout(request.C, timeout, ErrMsgReceiptTimeout)
 
-	c.Assert(err, NotNil)
+	require.Error(t, err)
 }
 
-//// GIVEN_TheTimeoutIsSetToZero_AND_TheMessageIsReceived_WHEN_CallingReadReceiptWithTimeout_THEN_DoNotReturnAnError
-func (s *StompSuite) Test_ZeroTimeout(c *C) {
+func TestStompZeroTimeout(t *testing.T) {
 	const timeout = 0 * time.Second
 	f := frame.Frame{}
 	request := writeRequest{
@@ -788,11 +785,11 @@ func (s *StompSuite) Test_ZeroTimeout(c *C) {
 	go sendFrameHelper(&receipt, request.C)
 	err := readReceiptWithTimeout(request.C, timeout, ErrMsgReceiptTimeout)
 
-	c.Assert(err, IsNil)
+	require.NoError(t, err)
 }
 
-func (s *StompSuite) Test_ConnectWithContext(c *C) {
-	fc1, fc2 := testutil.NewFakeConn(c)
+func TestStompConnectWithContext(t *testing.T) {
+	fc1, fc2 := testutil.NewFakeConn(t)
 
 	go func() {
 		buff := make([]byte, 1024)
@@ -803,7 +800,7 @@ func (s *StompSuite) Test_ConnectWithContext(c *C) {
 	defer cancel()
 
 	_, err := ConnectWithContext(ctx, fc1)
-	// the err here is "io timeout" because the server did not reply to any stomp message 
+	// the err here is "io timeout" because the server did not reply to any stomp message
 	// and the connection waited longer than the 5 seconds we set
-	c.Assert(err, NotNil)
+	require.Error(t, err)
 }

@@ -3,15 +3,12 @@ package frame
 import (
 	"bytes"
 	"strings"
+	"testing"
 
-	. "gopkg.in/check.v1"
+	"github.com/stretchr/testify/require"
 )
 
-type WriterSuite struct{}
-
-var _ = Suite(&WriterSuite{})
-
-func (s *WriterSuite) TestWrites(c *C) {
+func TestWriterWrites(t *testing.T) {
 	var frameTexts = []string{
 		"CONNECT\nlogin:xxx\npasscode:yyy\n\n\x00",
 
@@ -27,22 +24,22 @@ func (s *WriterSuite) TestWrites(c *C) {
 	}
 
 	for _, frameText := range frameTexts {
-		writeToBufferAndCheck(c, frameText)
+		writeToBufferAndCheck(t, frameText)
 	}
 }
 
-func writeToBufferAndCheck(c *C, frameText string) {
+func writeToBufferAndCheck(t *testing.T, frameText string) {
 	reader := NewReader(strings.NewReader(frameText))
 
 	frame, err := reader.Read()
-	c.Assert(err, IsNil)
-	c.Assert(frame, NotNil)
+	require.NoError(t, err)
+	require.NotNil(t, frame)
 
 	var b bytes.Buffer
 	var writer = NewWriter(&b)
 	err = writer.Write(frame)
-	c.Assert(err, IsNil)
+	require.NoError(t, err)
 	newFrameText := b.String()
-	c.Check(newFrameText, Equals, frameText)
-	c.Check(b.String(), Equals, frameText)
+	require.Equal(t, frameText, newFrameText)
+	require.Equal(t, frameText, b.String())
 }

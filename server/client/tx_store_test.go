@@ -1,32 +1,30 @@
 package client
 
 import (
+	"testing"
+
 	"github.com/go-stomp/stomp/v3/frame"
-	. "gopkg.in/check.v1"
+	"github.com/stretchr/testify/require"
 )
 
-type TxStoreSuite struct{}
-
-var _ = Suite(&TxStoreSuite{})
-
-func (s *TxStoreSuite) TestDoubleBegin(c *C) {
+func TestTxStoreDoubleBegin(t *testing.T) {
 	txs := txStore{}
 
 	err := txs.Begin("tx1")
-	c.Assert(err, IsNil)
+	require.NoError(t, err)
 
 	err = txs.Begin("tx1")
-	c.Assert(err, Equals, txAlreadyInProgress)
+	require.ErrorIs(t, err, txAlreadyInProgress)
 }
 
-func (s *TxStoreSuite) TestSuccessfulTx(c *C) {
+func TestTxStoreSuccessfulTx(t *testing.T) {
 	txs := txStore{}
 
 	err := txs.Begin("tx1")
-	c.Check(err, IsNil)
+	require.NoError(t, err)
 
 	err = txs.Begin("tx2")
-	c.Assert(err, IsNil)
+	require.NoError(t, err)
 
 	f1 := frame.New(frame.MESSAGE,
 		frame.Destination, "/queue/1")
@@ -41,11 +39,11 @@ func (s *TxStoreSuite) TestSuccessfulTx(c *C) {
 		frame.Destination, "/queue/4")
 
 	err = txs.Add("tx1", f1)
-	c.Assert(err, IsNil)
+	require.NoError(t, err)
 	err = txs.Add("tx1", f2)
-	c.Assert(err, IsNil)
+	require.NoError(t, err)
 	err = txs.Add("tx1", f3)
-	c.Assert(err, IsNil)
+	require.NoError(t, err)
 	err = txs.Add("tx2", f4)
 
 	var tx1 []*frame.Frame
@@ -54,7 +52,7 @@ func (s *TxStoreSuite) TestSuccessfulTx(c *C) {
 		tx1 = append(tx1, f)
 		return nil
 	})
-	c.Check(err, IsNil)
+	require.NoError(t, err)
 
 	var tx2 []*frame.Frame
 
@@ -62,20 +60,20 @@ func (s *TxStoreSuite) TestSuccessfulTx(c *C) {
 		tx2 = append(tx2, f)
 		return nil
 	})
-	c.Check(err, IsNil)
+	require.NoError(t, err)
 
-	c.Check(len(tx1), Equals, 3)
-	c.Check(tx1[0], Equals, f1)
-	c.Check(tx1[1], Equals, f2)
-	c.Check(tx1[2], Equals, f3)
+	require.Len(t, tx1, 3)
+	require.Equal(t, f1, tx1[0])
+	require.Equal(t, f2, tx1[1])
+	require.Equal(t, f3, tx1[2])
 
-	c.Check(len(tx2), Equals, 1)
-	c.Check(tx2[0], Equals, f4)
+	require.Len(t, tx2, 1)
+	require.Equal(t, f4, tx2[0])
 
 	// already committed, so should cause an error
 	err = txs.Commit("tx1", func(f *frame.Frame) error {
-		c.Fatal("should not be called")
+		t.Fatal("should not be called")
 		return nil
 	})
-	c.Check(err, Equals, txUnknown)
+	require.ErrorIs(t, err, txUnknown)
 }

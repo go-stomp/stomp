@@ -1,15 +1,12 @@
 package client
 
 import (
-	. "gopkg.in/check.v1"
+	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
-// Test suite for testing that channels work the way I expect.
-type ChannelSuite struct{}
-
-var _ = Suite(&ChannelSuite{})
-
-func (s *ChannelSuite) TestChannelWhenClosed(c *C) {
+func TestChannelWhenClosed(t *testing.T) {
 
 	ch := make(chan int, 10)
 
@@ -18,22 +15,22 @@ func (s *ChannelSuite) TestChannelWhenClosed(c *C) {
 
 	select {
 	case i, ok := <-ch:
-		c.Assert(i, Equals, 1)
-		c.Assert(ok, Equals, true)
+		require.Equal(t, 1, i)
+		require.True(t, ok)
 	default:
-		c.Error("expected value on channel")
+		t.Fatal("expected value on channel")
 	}
 
 	select {
 	case i := <-ch:
-		c.Assert(i, Equals, 2)
+		require.Equal(t, 2, i)
 	default:
-		c.Error("expected value on channel")
+		t.Fatal("expected value on channel")
 	}
 
 	select {
 	case _ = <-ch:
-		c.Error("not expecting anything on the channel")
+		t.Fatal("not expecting anything on the channel")
 	default:
 	}
 
@@ -42,27 +39,27 @@ func (s *ChannelSuite) TestChannelWhenClosed(c *C) {
 
 	select {
 	case i := <-ch:
-		c.Assert(i, Equals, 3)
+		require.Equal(t, 3, i)
 	default:
-		c.Error("expected value on channel")
+		t.Fatal("expected value on channel")
 	}
 
 	select {
 	case _, ok := <-ch:
-		c.Assert(ok, Equals, false)
+		require.False(t, ok)
 	default:
-		c.Error("expected value on channel")
+		t.Fatal("expected value on channel")
 	}
 
 	select {
 	case _, ok := <-ch:
-		c.Assert(ok, Equals, false)
+		require.False(t, ok)
 	default:
-		c.Error("expected value on channel")
+		t.Fatal("expected value on channel")
 	}
 }
 
-func (s *ChannelSuite) TestMultipleChannels(c *C) {
+func TestChannelMultipleChannels(t *testing.T) {
 
 	ch1 := make(chan int, 10)
 	ch2 := make(chan string, 10)
@@ -71,18 +68,18 @@ func (s *ChannelSuite) TestMultipleChannels(c *C) {
 
 	select {
 	case i, ok := <-ch1:
-		c.Assert(i, Equals, 1)
-		c.Assert(ok, Equals, true)
+		require.Equal(t, 1, i)
+		require.True(t, ok)
 	case _ = <-ch2:
 	default:
-		c.Error("expected value on channel")
+		t.Fatal("expected value on channel")
 	}
 
 	select {
 	case _ = <-ch1:
-		c.Error("not expected")
+		t.Fatal("not expected")
 	case _ = <-ch2:
-		c.Error("not expected")
+		t.Fatal("not expected")
 	default:
 	}
 }
