@@ -52,7 +52,7 @@ func (tx *Transaction) abort(receipt bool) error {
 	f := frame.New(frame.ABORT, frame.Transaction, tx.id)
 
 	if receipt {
-		id := allocateId()
+		id := tx.conn.AllocateID()
 		f.Header.Set(frame.Receipt, id)
 	}
 
@@ -87,7 +87,7 @@ func (tx *Transaction) commit(receipt bool) error {
 	f := frame.New(frame.COMMIT, frame.Transaction, tx.id)
 
 	if receipt {
-		id := allocateId()
+		id := tx.conn.AllocateID()
 		f.Header.Set(frame.Receipt, id)
 	}
 
@@ -115,7 +115,7 @@ func (tx *Transaction) Send(destination, contentType string, body []byte, opts .
 		return ErrCompletedTransaction
 	}
 
-	f, err := createSendFrame(destination, contentType, body, opts)
+	f, err := createSendFrame(tx.conn, destination, contentType, body, opts)
 	if err != nil {
 		return err
 	}

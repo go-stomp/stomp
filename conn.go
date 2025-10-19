@@ -40,6 +40,7 @@ const ReplyToHeader = "reply-to"
 // A Conn is a connection to a STOMP server. Create a Conn using either
 // the Dial or Connect function.
 type Conn struct {
+	lastId                    uint64
 	conn                      io.ReadWriteCloser
 	readCh                    chan *frame.Frame
 	writeCh                   chan writeRequest
@@ -511,7 +512,7 @@ func (c *Conn) Disconnect() error {
 
 	ch := make(chan *frame.Frame)
 	request := writeRequest{
-		Frame: frame.New(frame.DISCONNECT, frame.Receipt, allocateId()),
+		Frame: frame.New(frame.DISCONNECT, frame.Receipt, c.AllocateID()),
 		C:     ch,
 	}
 
@@ -570,7 +571,7 @@ func (c *Conn) Send(destination, contentType string, body []byte, opts ...func(*
 		return ErrAlreadyClosed
 	}
 
-	f, err := createSendFrame(destination, contentType, body, opts)
+	f, err := createSendFrame(c, destination, contentType, body, opts)
 	if err != nil {
 		return err
 	}
@@ -641,12 +642,16 @@ func sendDataToWriteChWithTimeout(ch chan writeRequest, request writeRequest, ti
 	}
 }
 
-func createSendFrame(destination, contentType string, body []byte, opts []func(*frame.Frame) error) (*frame.Frame, error) {
+func createSendFrame(conn *Conn, destination, contentType string, body []byte, opts []func(*frame.Frame) error) (*frame.Frame, error) {
 	// Set the content-length before the options, because this provides
 	// an opportunity to remove content-length.
 	f := frame.New(frame.SEND, frame.ContentLength, strconv.Itoa(len(body)))
 	f.Body = body
 	f.Header.Set(frame.Destination, destination)
+	f.Conn = conn
+	defer func() {
+		f.Conn = nil
+	}()
 	if contentType != "" {
 		f.Header.Set(frame.ContentType, contentType)
 	}
@@ -754,6 +759,11 @@ func (c *Conn) Subscribe(destination string, ack AckMode, opts ...func(*frame.Fr
 		frame.Destination, destination,
 		frame.Ack, ack.String())
 
+	subscribeFrame.Conn = c
+	defer func() {
+		subscribeFrame.Conn = nil
+	}()
+
 	for _, opt := range opts {
 		if opt == nil {
 			continue
@@ -782,7 +792,7 @@ func (c *Conn) Subscribe(destination string, ack AckMode, opts ...func(*frame.Fr
 	// create one.
 	id, ok := subscribeFrame.Header.Contains(frame.Id)
 	if !ok {
-		id = allocateId()
+		id = c.AllocateID()
 		subscribeFrame.Header.Add(frame.Id, id)
 	}
 
@@ -877,7 +887,7 @@ func (c *Conn) Begin() *Transaction {
 // BeginWithError is used to start a transaction, but also returns the error
 // (if any) from sending the frame to start the transaction.
 func (c *Conn) BeginWithError() (*Transaction, error) {
-	id := allocateId()
+	id := c.AllocateID()
 	f := frame.New(frame.BEGIN, frame.Transaction, id)
 	err := c.sendFrame(f)
 	return &Transaction{id: id, conn: c}, err
@@ -930,4 +940,13 @@ func (c *Conn) createAckNackFrame(msg *Message, ack bool) (*frame.Frame, error) 
 	}
 
 	return f, nil
+}
+
+// AllocateID returns a unique number for the current
+// process. Starts at one and increases. Used for
+// allocating subscription ids, receipt ids,
+// transaction ids, etc.
+func (c *Conn) AllocateID() string {
+	id := atomic.AddUint64(&c.lastId, 1)
+	return strconv.FormatUint(id, 10)
 }

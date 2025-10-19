@@ -59,7 +59,7 @@ func init() {
 				return ErrInvalidCommand
 			}
 			if receiptId == "" {
-				receiptId = allocateId()
+				receiptId = f.Conn.AllocateID()
 			}
 			f.Header.Set(frame.Receipt, receiptId)
 			return nil

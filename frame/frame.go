@@ -10,6 +10,14 @@ type Frame struct {
 	Command string
 	Header  *Header
 	Body    []byte
+
+	// Conn is temporarily set to the connection while processing the send
+	// options so the SendOpt functions can allocate IDs.
+	Conn conn
+}
+
+type conn interface {
+	AllocateID() string
 }
 
 // New creates a new STOMP frame with the specified command and headers.
