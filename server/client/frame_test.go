@@ -1,82 +1,80 @@
 package client
 
 import (
+	"testing"
+
 	"github.com/go-stomp/stomp/v3"
 	"github.com/go-stomp/stomp/v3/frame"
-	. "gopkg.in/check.v1"
+	"github.com/stretchr/testify/require"
 )
 
-type FrameSuite struct{}
-
-var _ = Suite(&FrameSuite{})
-
-func (s *FrameSuite) TestDetermineVersion_V10_Connect(c *C) {
+func TestFrameDetermineVersion_V10_Connect(t *testing.T) {
 	f := frame.New(frame.CONNECT)
 	version, err := determineVersion(f)
-	c.Check(err, IsNil)
-	c.Check(version, Equals, stomp.V10)
+	require.NoError(t, err)
+	require.Equal(t, stomp.V10, version)
 }
 
-func (s *FrameSuite) TestDetermineVersion_V10_Stomp(c *C) {
+func TestFrameDetermineVersion_V10_Stomp(t *testing.T) {
 	// the "STOMP" command was introduced in V1.1, so it must
 	// have an accept-version header
 	f := frame.New(frame.STOMP)
 	_, err := determineVersion(f)
-	c.Check(err, Equals, missingHeader(frame.AcceptVersion))
+	require.ErrorIs(t, err, missingHeader(frame.AcceptVersion))
 }
 
-func (s *FrameSuite) TestDetermineVersion_V11_Connect(c *C) {
+func TestFrameDetermineVersion_V11_Connect(t *testing.T) {
 	f := frame.New(frame.CONNECT)
 	f.Header.Add(frame.AcceptVersion, "1.1")
 	version, err := determineVersion(f)
-	c.Check(version, Equals, stomp.V11)
-	c.Check(err, IsNil)
+	require.NoError(t, err)
+	require.Equal(t, stomp.V11, version)
 }
 
-func (s *FrameSuite) TestDetermineVersion_MultipleVersions(c *C) {
+func TestFrameDetermineVersion_MultipleVersions(t *testing.T) {
 	f := frame.New(frame.CONNECT)
 	f.Header.Add(frame.AcceptVersion, "1.2,1.1,1.0,2.0")
 	version, err := determineVersion(f)
-	c.Check(version, Equals, stomp.V12)
-	c.Check(err, IsNil)
+	require.NoError(t, err)
+	require.Equal(t, stomp.V12, version)
 }
 
-func (s *FrameSuite) TestDetermineVersion_IncompatibleVersions(c *C) {
+func TestFrameDetermineVersion_IncompatibleVersions(t *testing.T) {
 	f := frame.New(frame.CONNECT)
 	f.Header.Add(frame.AcceptVersion, "0.2,0.1,1.3,2.0")
 	version, err := determineVersion(f)
-	c.Check(version, Equals, stomp.Version(""))
-	c.Check(err, Equals, unknownVersion)
+	require.ErrorIs(t, err, unknownVersion)
+	require.Equal(t, stomp.Version(""), version)
 }
 
-func (s *FrameSuite) TestHeartBeat(c *C) {
+func TestFrameHeartBeat(t *testing.T) {
 	f := frame.New(frame.CONNECT,
 		frame.AcceptVersion, "1.2",
 		frame.Host, "XX")
 
 	// no heart-beat header means zero values
 	x, y, err := getHeartBeat(f)
-	c.Check(x, Equals, 0)
-	c.Check(y, Equals, 0)
-	c.Check(err, IsNil)
+	require.NoError(t, err)
+	require.Equal(t, 0, x)
+	require.Equal(t, 0, y)
 
 	f.Header.Add("heart-beat", "123,456")
 	x, y, err = getHeartBeat(f)
-	c.Check(x, Equals, 123)
-	c.Check(y, Equals, 456)
-	c.Check(err, IsNil)
+	require.NoError(t, err)
+	require.Equal(t, 123, x)
+	require.Equal(t, 456, y)
 
 	f.Header.Set(frame.HeartBeat, "invalid")
 	x, y, err = getHeartBeat(f)
-	c.Check(x, Equals, 0)
-	c.Check(y, Equals, 0)
-	c.Check(err, Equals, invalidHeartBeat)
+	require.Equal(t, 0, x)
+	require.Equal(t, 0, y)
+	require.ErrorIs(t, err, invalidHeartBeat)
 
 	f.Header.Del(frame.HeartBeat)
 	_, _, err = getHeartBeat(f)
-	c.Check(err, IsNil)
+	require.NoError(t, err)
 
 	f.Command = frame.SEND
 	_, _, err = getHeartBeat(f)
-	c.Check(err, Equals, invalidOperationForFrame)
+	require.ErrorIs(t, err, invalidOperationForFrame)
 }
