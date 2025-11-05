@@ -476,8 +476,8 @@ func sendError(m map[string]chan *frame.Frame, err error) {
 // to the server will fail.
 func (c *Conn) Disconnect() error {
 	c.closeMutex.Lock()
-	defer c.closeMutex.Unlock()
 	if c.closed {
+		c.closeMutex.Unlock()
 		return nil
 	}
 
@@ -486,21 +486,28 @@ func (c *Conn) Disconnect() error {
 	}
 
 	ch := make(chan *frame.Frame)
-	c.writeCh <- writeRequest{
+	request := writeRequest{
 		Frame: frame.New(frame.DISCONNECT, frame.Receipt, allocateId()),
 		C:     ch,
 	}
 
-	err := readReceiptWithTimeout(ch, c.disconnectReceiptTimeout, ErrDisconnectReceiptTimeout)
-	if err == nil {
-		c.closed = true
-		return c.conn.Close()
+	err := sendDataToWriteChWithTimeout(c.writeCh, request, c.msgSendTimeout)
+	if err != nil {
+		return err
+	}
+	c.closeMutex.Unlock()
+
+	err = readReceiptWithTimeout(ch, c.disconnectReceiptTimeout, ErrDisconnectReceiptTimeout)
+
+	c.closeMutex.Lock()
+	defer c.closeMutex.Unlock()
+
+	if c.closed {
+		return nil
 	}
 
-	if err == ErrDisconnectReceiptTimeout {
-		c.closed = true
-		_ = c.conn.Close()
-	}
+	c.closed = true
+	_ = c.conn.Close()
 
 	return err
 }
@@ -653,7 +660,11 @@ func (c *Conn) sendFrame(f *frame.Frame) error {
 			C:     make(chan *frame.Frame),
 		}
 
-		c.writeCh <- request
+		err := sendDataToWriteChWithTimeout(c.writeCh, request, c.msgSendTimeout)
+		if err != nil {
+			c.closeMutex.Unlock()
+			return err
+		}
 
 		// Now that we've written to the writeCh channel we can release the
 		// close mutex while we wait for our response
@@ -681,7 +692,11 @@ func (c *Conn) sendFrame(f *frame.Frame) error {
 	} else {
 		// no receipt required
 		request := writeRequest{Frame: f}
-		c.writeCh <- request
+		err := sendDataToWriteChWithTimeout(c.writeCh, request, c.msgSendTimeout)
+		if err != nil {
+			c.closeMutex.Unlock()
+			return err
+		}
 
 		// Unlock the mutex now that we're written to the write channel
 		c.closeMutex.Unlock()
@@ -756,7 +771,10 @@ func (c *Conn) Subscribe(destination string, ack AckMode, opts ...func(*frame.Fr
 	}
 
 	// TODO is this safe? There is no check if writeCh is actually open.
-	c.writeCh <- request
+	err := sendDataToWriteChWithTimeout(c.writeCh, request, c.msgSendTimeout)
+	if err != nil {
+		return nil, err
+	}
 	return sub, nil
 }
 
