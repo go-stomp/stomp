@@ -493,6 +493,7 @@ func (c *Conn) Disconnect() error {
 
 	err := sendDataToWriteChWithTimeout(c.writeCh, request, c.msgSendTimeout)
 	if err != nil {
+	    c.closeMutex.Unlock()
 		return err
 	}
 	c.closeMutex.Unlock()
