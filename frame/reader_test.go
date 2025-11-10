@@ -3,30 +3,27 @@ package frame
 import (
 	"io"
 	"strings"
+	"testing"
 	"testing/iotest"
 
-	. "gopkg.in/check.v1"
+	"github.com/stretchr/testify/require"
 )
 
-type ReaderSuite struct{}
-
-var _ = Suite(&ReaderSuite{})
-
-func (s *ReaderSuite) TestConnect(c *C) {
+func TestReaderConnect(t *testing.T) {
 	reader := NewReader(strings.NewReader("CONNECT\nlogin:xxx\npasscode:yyy\n\n\x00"))
 
 	frame, err := reader.Read()
-	c.Assert(err, IsNil)
-	c.Assert(frame, NotNil)
-	c.Assert(len(frame.Body), Equals, 0)
+	require.Nil(t, err)
+	require.NotNil(t, frame)
+	require.Len(t, frame.Body, 0)
 
 	// ensure we are at the end of input
 	frame, err = reader.Read()
-	c.Assert(frame, IsNil)
-	c.Assert(err, Equals, io.EOF)
+	require.Nil(t, frame)
+	require.ErrorIs(t, err, io.EOF)
 }
 
-func (s *ReaderSuite) TestMultipleReads(c *C) {
+func TestReaderMultipleReads(t *testing.T) {
 	text := "SEND\ndestination:xxx\n\nPayload\x00\n" +
 		"SEND\ndestination:yyy\ncontent-length:12\n" +
 		"dodgy\\c\\n\\cheader:dodgy\\c\\n\\r\\nvalue\\  \\\n\n" +
@@ -44,97 +41,97 @@ func (s *ReaderSuite) TestMultipleReads(c *C) {
 		//ioreader = iotest.NewReadLogger("RX", ioreader)
 		reader := NewReader(ioreader)
 		frame, err := reader.Read()
-		c.Assert(err, IsNil)
-		c.Assert(frame, NotNil)
-		c.Assert(frame.Command, Equals, "SEND")
-		c.Assert(frame.Header.Len(), Equals, 1)
+		require.NoError(t, err)
+		require.NotNil(t, frame)
+		require.Equal(t, "SEND", frame.Command)
+		require.Equal(t, 1, frame.Header.Len())
 		v := frame.Header.Get("destination")
-		c.Assert(v, Equals, "xxx")
-		c.Assert(string(frame.Body), Equals, "Payload")
+		require.Equal(t, "xxx", v)
+		require.Equal(t, "Payload", string(frame.Body))
 
 		// now read a heart-beat from the input
 		frame, err = reader.Read()
-		c.Assert(err, IsNil)
-		c.Assert(frame, IsNil)
+		require.NoError(t, err)
+		require.Nil(t, frame)
 
 		// this frame has content-length
 		frame, err = reader.Read()
-		c.Assert(err, IsNil)
-		c.Assert(frame, NotNil)
-		c.Assert(frame.Command, Equals, "SEND")
-		c.Assert(frame.Header.Len(), Equals, 3)
+		require.NoError(t, err)
+		require.NotNil(t, frame)
+		require.Equal(t, "SEND", frame.Command)
+		require.Equal(t, 3, frame.Header.Len())
 		v = frame.Header.Get("destination")
-		c.Assert(v, Equals, "yyy")
+		require.Equal(t, "yyy", v)
 		n, ok, err := frame.Header.ContentLength()
-		c.Assert(n, Equals, 12)
-		c.Assert(ok, Equals, true)
-		c.Assert(err, IsNil)
+		require.Equal(t, 12, n)
+		require.True(t, ok)
+		require.NoError(t, err)
 		k, v := frame.Header.GetAt(2)
-		c.Assert(k, Equals, "dodgy:\n:header")
-		c.Assert(v, Equals, "dodgy:\n\r\nvalue\\  \\")
-		c.Assert(string(frame.Body), Equals, "123456789AB\x00")
+		require.Equal(t, "dodgy:\n:header", k)
+		require.Equal(t, "dodgy:\n\r\nvalue\\  \\", v)
+		require.Equal(t, "123456789AB\x00", string(frame.Body))
 
 		// ensure we are at the end of input
 		frame, err = reader.Read()
-		c.Assert(frame, IsNil)
-		c.Assert(err, Equals, io.EOF)
+		require.Nil(t, frame)
+		require.ErrorIs(t, err, io.EOF)
 	}
 }
 
-func (s *ReaderSuite) TestSendWithContentLength(c *C) {
+func TestReaderSendWithContentLength(t *testing.T) {
 	reader := NewReader(strings.NewReader("SEND\ndestination:xxx\ncontent-length:5\n\n\x00\x01\x02\x03\x04\x00"))
 
 	frame, err := reader.Read()
-	c.Assert(err, IsNil)
-	c.Assert(frame, NotNil)
-	c.Assert(frame.Command, Equals, "SEND")
-	c.Assert(frame.Header.Len(), Equals, 2)
+	require.NoError(t, err)
+	require.NotNil(t, frame)
+	require.Equal(t, "SEND", frame.Command)
+	require.Equal(t, 2, frame.Header.Len())
 	v := frame.Header.Get("destination")
-	c.Assert(v, Equals, "xxx")
-	c.Assert(frame.Body, DeepEquals, []byte{0x00, 0x01, 0x02, 0x03, 0x04})
+	require.Equal(t, "xxx", v)
+	require.Equal(t, []byte{0x00, 0x01, 0x02, 0x03, 0x04}, frame.Body)
 
 	// ensure we are at the end of input
 	frame, err = reader.Read()
-	c.Assert(frame, IsNil)
-	c.Assert(err, Equals, io.EOF)
+	require.Nil(t, frame)
+	require.ErrorIs(t, err, io.EOF)
 }
 
-func (s *ReaderSuite) TestInvalidCommand(c *C) {
+func TestReaderInvalidCommand(t *testing.T) {
 	reader := NewReader(strings.NewReader("sEND\ndestination:xxx\ncontent-length:5\n\n\x00\x01\x02\x03\x04\x00"))
 
 	frame, err := reader.Read()
-	c.Check(frame, IsNil)
-	c.Assert(err, NotNil)
-	c.Check(err.Error(), Equals, "invalid command")
+	require.Nil(t, frame)
+	require.Error(t, err)
+	require.Equal(t, "invalid command", err.Error())
 }
 
-func (s *ReaderSuite) TestMissingNull(c *C) {
+func TestReaderMissingNull(t *testing.T) {
 	reader := NewReader(strings.NewReader("SEND\ndeestination:xxx\ncontent-length:5\n\n\x00\x01\x02\x03\x04\n"))
 
 	f, err := reader.Read()
-	c.Check(f, IsNil)
-	c.Assert(err, NotNil)
-	c.Check(err.Error(), Equals, "invalid frame format")
+	require.Nil(t, f)
+	require.Error(t, err)
+	require.Equal(t, "invalid frame format", err.Error())
 }
 
-func (s *ReaderSuite) TestSubscribeWithoutId(c *C) {
-	c.Skip("TODO: implement validate")
+func TestReaderSubscribeWithoutId(t *testing.T) {
+	t.Skip("TODO: implement validate")
 
 	reader := NewReader(strings.NewReader("SUBSCRIBE\ndestination:xxx\nIId:7\n\n\x00"))
 
 	frame, err := reader.Read()
-	c.Check(frame, IsNil)
-	c.Assert(err, NotNil)
-	c.Check(err.Error(), Equals, "missing header: id")
+	require.Nil(t, frame)
+	require.Error(t, err)
+	require.Equal(t, "missing header: id", err.Error())
 }
 
-func (s *ReaderSuite) TestUnsubscribeWithoutId(c *C) {
-	c.Skip("TODO: implement validate")
+func TestReaderUnsubscribeWithoutId(t *testing.T) {
+	t.Skip("TODO: implement validate")
 
 	reader := NewReader(strings.NewReader("UNSUBSCRIBE\nIId:7\n\n\x00"))
 
 	frame, err := reader.Read()
-	c.Check(frame, IsNil)
-	c.Assert(err, NotNil)
-	c.Check(err.Error(), Equals, "missing header: id")
+	require.Nil(t, frame)
+	require.Error(t, err)
+	require.Equal(t, "missing header: id", err.Error())
 }

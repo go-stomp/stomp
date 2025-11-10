@@ -1,15 +1,11 @@
 package stomp
 
-import (
-	. "gopkg.in/check.v1"
-	"runtime"
-)
-
 // only used during testing, does not need to be thread-safe
 func resetId() {
 	_lastId = 0
 }
 
+/*
 func (s *StompSuite) SetUpSuite(c *C) {
 	resetId()
 	runtime.GOMAXPROCS(runtime.NumCPU())
@@ -41,3 +37,4 @@ func doAllocate(count int, ch chan bool) {
 	}
 	ch <- true
 }
+*/

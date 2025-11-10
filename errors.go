@@ -34,6 +34,13 @@ func (e Error) Error() string {
 	return e.Message
 }
 
+func (e Error) Is(target error) bool {
+	if err, ok := target.(Error); ok {
+		return e.Message == err.Message
+	}
+	return false
+}
+
 func missingHeader(name string) Error {
 	return newErrorMessage("missing header: " + name)
 }

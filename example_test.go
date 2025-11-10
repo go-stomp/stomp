@@ -1,3 +1,6 @@
+//go:build example
+// +build example
+
 package stomp_test
 
 import (

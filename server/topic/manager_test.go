@@ -1,21 +1,19 @@
 package topic
 
 import (
-	. "gopkg.in/check.v1"
+	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
-type ManagerSuite struct{}
-
-var _ = Suite(&ManagerSuite{})
-
-func (s *ManagerSuite) TestManager(c *C) {
+func TestManager(t *testing.T) {
 	mgr := NewManager()
 
 	t1 := mgr.Find("topic1")
-	c.Assert(t1, NotNil)
+	require.NotNil(t, t1)
 
 	t2 := mgr.Find("topic2")
-	c.Assert(t2, NotNil)
+	require.NotNil(t, t2)
 
-	c.Assert(mgr.Find("topic1"), Equals, t1)
+	require.Equal(t, t1, mgr.Find("topic1"))
 }
