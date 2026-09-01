@@ -20,6 +20,7 @@ var (
 	ErrMsgReceiptTimeout         = newErrorMessage("msg receipt timeout")
 	ErrDisconnectReceiptTimeout  = newErrorMessage("disconnect receipt timeout")
 	ErrUnsubscribeReceiptTimeout = newErrorMessage("unsubscribe receipt timeout")
+	ErrSubscribeReceiptTimeout   = newErrorMessage("subscribe receipt timeout")
 	ErrNilOption                 = newErrorMessage("nil option")
 )
 

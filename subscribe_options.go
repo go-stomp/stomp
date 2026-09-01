@@ -16,6 +16,17 @@ var SubscribeOpt struct {
 	// Header provides the opportunity to include custom header entries
 	// in the SUBSCRIBE frame that the client sends to the server.
 	Header func(key, value string) func(*frame.Frame) error
+
+	// Receipt makes Conn.Subscribe wait for the server to confirm the
+	// subscription with a RECEIPT frame before returning, avoiding a race
+	// where a message published right after Subscribe() returns is lost
+	// because the server hasn't finished creating the subscription yet.
+	//
+	// If confirmation doesn't arrive within ConnOpt.SubscribeReceiptTimeout,
+	// Subscribe unsubscribes again and returns ErrSubscribeReceiptTimeout.
+	// Ignored for reply-to (temporary queue) subscriptions, which are never
+	// sent to the server and so cannot be confirmed.
+	Receipt func(*frame.Frame) error
 }
 
 func init() {
@@ -38,5 +49,13 @@ func init() {
 			f.Header.Add(key, value)
 			return nil
 		}
+	}
+
+	SubscribeOpt.Receipt = func(f *frame.Frame) error {
+		if f.Command != frame.SUBSCRIBE {
+			return ErrInvalidCommand
+		}
+		f.Header.Set(frame.Receipt, allocateId())
+		return nil
 	}
 }
