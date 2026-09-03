@@ -22,11 +22,14 @@ var SubscribeOpt struct {
 	// where a message published right after Subscribe() returns is lost
 	// because the server hasn't finished creating the subscription yet.
 	//
+	// receiptId is the value of the "receipt" header sent to the server. If
+	// left empty, a unique value is generated.
+	//
 	// If confirmation doesn't arrive within ConnOpt.SubscribeReceiptTimeout,
 	// Subscribe unsubscribes again and returns ErrSubscribeReceiptTimeout.
 	// Ignored for reply-to (temporary queue) subscriptions, which are never
 	// sent to the server and so cannot be confirmed.
-	Receipt func(*frame.Frame) error
+	Receipt func(receiptId string) func(*frame.Frame) error
 }
 
 func init() {
@@ -51,11 +54,16 @@ func init() {
 		}
 	}
 
-	SubscribeOpt.Receipt = func(f *frame.Frame) error {
-		if f.Command != frame.SUBSCRIBE {
-			return ErrInvalidCommand
+	SubscribeOpt.Receipt = func(receiptId string) func(*frame.Frame) error {
+		return func(f *frame.Frame) error {
+			if f.Command != frame.SUBSCRIBE {
+				return ErrInvalidCommand
+			}
+			if receiptId == "" {
+				receiptId = allocateId()
+			}
+			f.Header.Set(frame.Receipt, receiptId)
+			return nil
 		}
-		f.Header.Set(frame.Receipt, allocateId())
-		return nil
 	}
 }

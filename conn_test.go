@@ -386,7 +386,7 @@ func (s *StompSuite) Test_subscribe_receipt_timeout(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(client, NotNil)
 
-	sub, err := client.Subscribe("/queue/test-1", AckAuto, SubscribeOpt.Receipt)
+	sub, err := client.Subscribe("/queue/test-1", AckAuto, SubscribeOpt.Receipt(""))
 	c.Assert(err, Equals, ErrSubscribeReceiptTimeout)
 	c.Assert(sub, IsNil)
 
@@ -435,7 +435,7 @@ func (s *StompSuite) Test_subscribe_reply_to_ignores_receipt(c *C) {
 
 	sub, err := client.Subscribe("/temp-queue/reply", AckAuto,
 		SubscribeOpt.Header(ReplyToHeader, "/temp-queue/reply"),
-		SubscribeOpt.Receipt)
+		SubscribeOpt.Receipt(""))
 	c.Assert(err, IsNil)
 	c.Assert(sub, NotNil)
 
@@ -527,7 +527,7 @@ func (s *StompSuite) Test_subscribe_with_receipt(c *C) {
 		c.Assert(err, IsNil)
 	}()
 
-	sub, err := conn.Subscribe("/queue/test-1", AckAuto, SubscribeOpt.Receipt)
+	sub, err := conn.Subscribe("/queue/test-1", AckAuto, SubscribeOpt.Receipt(""))
 	c.Assert(err, IsNil)
 	c.Assert(sub, NotNil)
 
