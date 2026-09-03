@@ -166,7 +166,7 @@ func ConnectWithContext(ctx context.Context, conn io.ReadWriteCloser, opts ...fu
 	if ok && isNetConn {
 		connection.SetReadDeadline(deadline)
 	}
-	
+
 	response, err := reader.Read()
 	if err != nil {
 		return nil, err
@@ -493,7 +493,7 @@ func (c *Conn) Disconnect() error {
 
 	err := sendDataToWriteChWithTimeout(c.writeCh, request, c.msgSendTimeout)
 	if err != nil {
-	    c.closeMutex.Unlock()
+		c.closeMutex.Unlock()
 		return err
 	}
 	c.closeMutex.Unlock()

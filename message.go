@@ -1,8 +1,8 @@
 package stomp
 
 import (
-	"io"
 	"github.com/go-stomp/stomp/v3/frame"
+	"io"
 )
 
 // A Message represents a message received from the STOMP server.
