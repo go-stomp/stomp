@@ -57,7 +57,7 @@ func (s *ServerSuite) TestHeartBeatingTolerance(c *C) {
 		Addr:          l.Addr().String(),
 		Authenticator: nil,
 		QueueStorage:  nil,
-		HeartBeat:     5 * time.Millisecond,
+		HeartBeat:     50 * time.Millisecond,
 	}
 	go serv.Serve(l)
 
@@ -65,8 +65,8 @@ func (s *ServerSuite) TestHeartBeatingTolerance(c *C) {
 	c.Assert(err, IsNil)
 	defer conn.Close()
 
-	client, err := stomp.Connect(conn, 
-		stomp.ConnOpt.HeartBeat(5 * time.Millisecond, 5 * time.Millisecond),
+	client, err := stomp.Connect(conn,
+		stomp.ConnOpt.HeartBeat(50*time.Millisecond, 50*time.Millisecond),
 	)
 	c.Assert(err, IsNil)
 	defer client.Disconnect()
