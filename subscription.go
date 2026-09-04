@@ -121,11 +121,23 @@ func (s *Subscription) Unsubscribe(opts ...func(*frame.Frame) error) error {
 // handed to the caller, because it failed while waiting for the confirming
 // RECEIPT. Unlike Unsubscribe, it doesn't wait for the RECEIPT itself: there
 // is nobody left to report the outcome to.
+//
+// If the broker never confirms the resulting UNSUBSCRIBE either, the drain
+// goroutine started below (and C itself) is only reclaimed when the
+// connection closes.
 func (s *Subscription) abandon() {
 	// transition to the "closing" state
 	if !atomic.CompareAndSwapInt32(&s.state, subStateActive, subStateClosing) {
 		return
 	}
+
+	// Nobody holds this subscription, so nobody will ever read C. Drain it
+	// until readLoop closes it, or messages already in flight would fill C,
+	// block readLoop on the frame channel and wedge processLoop with it.
+	go func() {
+		for range s.C {
+		}
+	}()
 
 	f := frame.New(frame.UNSUBSCRIBE, frame.Id, s.id)
 	if s.replyToSet {

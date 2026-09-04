@@ -397,6 +397,85 @@ func (s *StompSuite) Test_subscribe_receipt_timeout(c *C) {
 	}
 }
 
+// Regression test for abandon() wedging the whole connection: if the broker
+// actually did create the subscription (it only lost or delayed the RECEIPT)
+// and starts delivering messages before Subscribe() gives up, readLoop must
+// not block forever trying to push them onto the now-unreachable
+// Subscription.C, since that would in turn block processLoop - and with it
+// every other frame on the connection, including the abandoning UNSUBSCRIBE
+// itself.
+func (s *StompSuite) Test_subscribe_abandon_does_not_wedge_connection(c *C) {
+	resetId()
+	fc1, fc2 := testutil.NewFakeConn(c)
+	stop := make(chan struct{})
+
+	go func() {
+		defer func() {
+			fc2.Close()
+			close(stop)
+		}()
+
+		reader := frame.NewReader(fc2)
+		writer := frame.NewWriter(fc2)
+
+		f1, err := reader.Read()
+		c.Assert(err, IsNil)
+		c.Assert(f1.Command, Equals, "CONNECT")
+		err = writer.Write(frame.New("CONNECTED"))
+		c.Assert(err, IsNil)
+
+		// read the SUBSCRIBE frame, but never send a RECEIPT for it
+		f2, err := reader.Read()
+		c.Assert(err, IsNil)
+		c.Assert(f2.Command, Equals, "SUBSCRIBE")
+		id, ok := f2.Header.Contains(frame.Id)
+		c.Assert(ok, Equals, true)
+
+		// flood more messages than Subscription.C can buffer (16), so that
+		// without draining, readLoop would block delivering one of them
+		for i := 0; i < 25; i++ {
+			err = writer.Write(frame.New(frame.MESSAGE,
+				frame.Subscription, id,
+				frame.Destination, "/queue/test-1",
+				frame.MessageId, allocateId()))
+			c.Assert(err, IsNil)
+		}
+
+		// the abandoning UNSUBSCRIBE must still reach the wire even though
+		// processLoop had messages queued up for the abandoned subscription
+		f3, err := reader.Read()
+		c.Assert(err, IsNil)
+		c.Assert(f3.Command, Equals, "UNSUBSCRIBE")
+		c.Assert(f3.Header.Get(frame.Id), Equals, id)
+		err = writer.Write(frame.New(frame.RECEIPT, frame.ReceiptId, f3.Header.Get(frame.Receipt)))
+		c.Assert(err, IsNil)
+
+		// the connection must still be usable afterwards
+		f4, err := reader.Read()
+		c.Assert(err, IsNil)
+		c.Assert(f4.Command, Equals, "DISCONNECT")
+		err = writer.Write(frame.New(frame.RECEIPT, frame.ReceiptId, f4.Header.Get(frame.Receipt)))
+		c.Assert(err, IsNil)
+	}()
+
+	client, err := Connect(fc1, ConnOpt.SubscribeReceiptTimeout(1*time.Millisecond))
+	c.Assert(err, IsNil)
+	c.Assert(client, NotNil)
+
+	sub, err := client.Subscribe("/queue/test-1", AckAuto, SubscribeOpt.Receipt(""))
+	c.Assert(err, Equals, ErrSubscribeReceiptTimeout)
+	c.Assert(sub, IsNil)
+
+	err = client.Disconnect()
+	c.Assert(err, IsNil)
+
+	select {
+	case <-stop:
+	case <-time.After(5 * time.Second):
+		c.Fatal("connection wedged: abandoned subscription's messages blocked processLoop")
+	}
+}
+
 // A reply-to (temporary queue) subscription is never sent to the server, so it
 // cannot be confirmed: SubscribeOpt.Receipt must be ignored rather than making
 // every such call fail after the receipt timeout.
