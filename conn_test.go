@@ -333,7 +333,7 @@ func (s *StompSuite) Test_successful_disconnect_with_receipt_timeout(c *C) {
 		c.Assert(err, IsNil)
 	}()
 
-	client, err := Connect(fc1, ConnOpt.DisconnectReceiptTimeout(1 * time.Nanosecond))
+	client, err := Connect(fc1, ConnOpt.DisconnectReceiptTimeout(1*time.Nanosecond))
 	c.Assert(err, IsNil)
 	c.Assert(client, NotNil)
 
@@ -723,7 +723,7 @@ func sendFrameHelper(f *frame.Frame, c chan *frame.Frame) {
 	c <- f
 }
 
-//// GIVEN_TheTimeoutIsExceededBeforeTheReceiptIsReceived_WHEN_CallingReadReceiptWithTimeout_THEN_ReturnAnError
+// // GIVEN_TheTimeoutIsExceededBeforeTheReceiptIsReceived_WHEN_CallingReadReceiptWithTimeout_THEN_ReturnAnError
 func (s *StompSuite) Test_TimeoutTriggers(c *C) {
 	const timeout = 1 * time.Millisecond
 	f := frame.Frame{}
@@ -737,7 +737,7 @@ func (s *StompSuite) Test_TimeoutTriggers(c *C) {
 	c.Assert(err, NotNil)
 }
 
-//// GIVEN_TheChannelReceivesTheReceiptBeforeTheTimeoutExpires_WHEN_CallingReadReceiptWithTimeout_THEN_DoNotReturnAnError
+// // GIVEN_TheChannelReceivesTheReceiptBeforeTheTimeoutExpires_WHEN_CallingReadReceiptWithTimeout_THEN_DoNotReturnAnError
 func (s *StompSuite) Test_ChannelReceviesReceipt(c *C) {
 	const timeout = 1 * time.Second
 	f := frame.Frame{}
@@ -755,7 +755,7 @@ func (s *StompSuite) Test_ChannelReceviesReceipt(c *C) {
 	c.Assert(err, IsNil)
 }
 
-//// GIVEN_TheChannelReceivesMessage_AND_TheMessageIsNotAReceipt_WHEN_CallingReadReceiptWithTimeout_THEN_ReturnAnError
+// // GIVEN_TheChannelReceivesMessage_AND_TheMessageIsNotAReceipt_WHEN_CallingReadReceiptWithTimeout_THEN_ReturnAnError
 func (s *StompSuite) Test_ChannelReceviesNonReceipt(c *C) {
 	const timeout = 1 * time.Second
 	f := frame.Frame{}
@@ -773,7 +773,7 @@ func (s *StompSuite) Test_ChannelReceviesNonReceipt(c *C) {
 	c.Assert(err, NotNil)
 }
 
-//// GIVEN_TheTimeoutIsSetToZero_AND_TheMessageIsReceived_WHEN_CallingReadReceiptWithTimeout_THEN_DoNotReturnAnError
+// // GIVEN_TheTimeoutIsSetToZero_AND_TheMessageIsReceived_WHEN_CallingReadReceiptWithTimeout_THEN_DoNotReturnAnError
 func (s *StompSuite) Test_ZeroTimeout(c *C) {
 	const timeout = 0 * time.Second
 	f := frame.Frame{}
@@ -803,7 +803,7 @@ func (s *StompSuite) Test_ConnectWithContext(c *C) {
 	defer cancel()
 
 	_, err := ConnectWithContext(ctx, fc1)
-	// the err here is "io timeout" because the server did not reply to any stomp message 
+	// the err here is "io timeout" because the server did not reply to any stomp message
 	// and the connection waited longer than the 5 seconds we set
 	c.Assert(err, NotNil)
 }
