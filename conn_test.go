@@ -477,9 +477,10 @@ func (s *StompSuite) Test_subscribe_abandon_does_not_wedge_connection(c *C) {
 }
 
 // A reply-to (temporary queue) subscription is never sent to the server, so it
-// cannot be confirmed: SubscribeOpt.Receipt must be ignored rather than making
-// every such call fail after the receipt timeout.
-func (s *StompSuite) Test_subscribe_reply_to_ignores_receipt(c *C) {
+// cannot be confirmed: SubscribeOpt.Receipt must fail fast with
+// ErrReceiptNotSupportedForReplyTo rather than blocking every such call until
+// the receipt timeout expires.
+func (s *StompSuite) Test_subscribe_reply_to_rejects_receipt(c *C) {
 	resetId()
 	fc1, fc2 := testutil.NewFakeConn(c)
 	stop := make(chan struct{})
@@ -515,8 +516,8 @@ func (s *StompSuite) Test_subscribe_reply_to_ignores_receipt(c *C) {
 	sub, err := client.Subscribe("/temp-queue/reply", AckAuto,
 		SubscribeOpt.Header(ReplyToHeader, "/temp-queue/reply"),
 		SubscribeOpt.Receipt(""))
-	c.Assert(err, IsNil)
-	c.Assert(sub, NotNil)
+	c.Assert(err, Equals, ErrReceiptNotSupportedForReplyTo)
+	c.Assert(sub, IsNil)
 
 	err = client.Disconnect()
 	c.Assert(err, IsNil)

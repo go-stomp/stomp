@@ -766,7 +766,10 @@ func (c *Conn) Subscribe(destination string, ack AckMode, opts ...func(*frame.Fr
 
 		// Reply-to subscriptions are never sent to the server, so no RECEIPT
 		// can ever arrive for one.
-		subscribeFrame.Header.Del(frame.Receipt)
+		if _, ok := subscribeFrame.Header.Contains(frame.Receipt); ok {
+			c.closeMutex.Unlock()
+			return nil, ErrReceiptNotSupportedForReplyTo
+		}
 	}
 
 	// If the option functions have not specified the "id" header entry,

@@ -27,8 +27,10 @@ var SubscribeOpt struct {
 	//
 	// If confirmation doesn't arrive within ConnOpt.SubscribeReceiptTimeout,
 	// Subscribe unsubscribes again and returns ErrSubscribeReceiptTimeout.
-	// Ignored for reply-to (temporary queue) subscriptions, which are never
-	// sent to the server and so cannot be confirmed.
+	//
+	// Reply-to (temporary queue) subscriptions are never sent to the server
+	// and so cannot be confirmed: using Receipt with one makes Subscribe
+	// return ErrReceiptNotSupportedForReplyTo.
 	Receipt func(receiptId string) func(*frame.Frame) error
 }
 
