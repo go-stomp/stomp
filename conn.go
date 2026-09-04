@@ -20,17 +20,19 @@ const DefaultHeartBeatError = 5 * time.Second
 // Default send timeout in Conn.Send function
 const DefaultMsgSendTimeout = 10 * time.Second
 
+const defaultReceiptTimeout = 30 * time.Second
+
 // Default receipt timeout in Conn.Send function
-const DefaultRcvReceiptTimeout = 30 * time.Second
+const DefaultRcvReceiptTimeout = defaultReceiptTimeout
 
 // Default receipt timeout in Conn.Disconnect function
-const DefaultDisconnectReceiptTimeout = 30 * time.Second
+const DefaultDisconnectReceiptTimeout = defaultReceiptTimeout
 
 // Default receipt timeout in Subscription.Unsubscribe function
-const DefaultUnsubscribeReceiptTimeout = 30 * time.Second
+const DefaultUnsubscribeReceiptTimeout = defaultReceiptTimeout
 
 // Default receipt timeout in Conn.Subscribe function, when SubscribeOpt.Receipt is used
-const DefaultSubscribeReceiptTimeout = 30 * time.Second
+const DefaultSubscribeReceiptTimeout = defaultReceiptTimeout
 
 // Reply-To header used for temporary queues/RPC with rabbit.
 const ReplyToHeader = "reply-to"
