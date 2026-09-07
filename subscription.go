@@ -28,8 +28,7 @@ type Subscription struct {
 	conn                      *Conn
 	ackMode                   AckMode
 	state                     int32
-	closeMutex                *sync.Mutex
-	closeCond                 *sync.Cond
+	done                      chan struct{}
 	closeOnce                 sync.Once
 	unsubscribeReceiptTimeout time.Duration
 }
@@ -96,39 +95,24 @@ func (s *Subscription) Unsubscribe(opts ...func(*frame.Frame) error) error {
 	// for the resulting RECEIPT.
 	//
 	// We don't want to interfere with `s.C` since we might be "stealing"
-	// MESSAGEs or ERRORs from another goroutine, so use a sync.Cond to
-	// wait for the terminal state transition instead.
-	s.closeMutex.Lock()
-	for atomic.LoadInt32(&s.state) != subStateClosed {
-		err = waitWithTimeout(s.closeCond, s.unsubscribeReceiptTimeout)
-		if err != nil && errors.Is(err, &ErrUnsubscribeReceiptTimeout) {
-			// The [closeCond.Broadcast] can race with the timeout, so make sure
-			// the channel is still available.
-			if atomic.LoadInt32(&s.state) != subStateClosed {
-				msg := s.subscriptionErrorMessage("channel unsubscribe receipt timeout")
-				s.C <- msg
-			}
-			return err
-		}
+	// MESSAGEs or ERRORs from another goroutine, so wait on `done` (closed
+	// exactly once by closeChannel) for the terminal state transition instead.
+	if s.unsubscribeReceiptTimeout <= 0 {
+		<-s.done
+		return nil
 	}
-	s.closeMutex.Unlock()
-	return err
-}
 
-func waitWithTimeout(cond *sync.Cond, timeout time.Duration) error {
-	if timeout == 0 {
-		cond.Wait()
-		return nil
-	}
-	waitChan := make(chan struct{})
-	go func() {
-		cond.Wait()
-		close(waitChan)
-	}()
 	select {
-	case <-waitChan:
+	case <-s.done:
 		return nil
-	case <-time.After(timeout):
+	case <-time.After(s.unsubscribeReceiptTimeout):
+		// s.done closing can race with the timeout firing; closeChannel closes
+		// s.C before s.done, so re-check state to avoid sending on a closed s.C.
+		if atomic.LoadInt32(&s.state) == subStateClosed {
+			return nil
+		}
+		msg := s.subscriptionErrorMessage("channel unsubscribe receipt timeout")
+		s.C <- msg
 		return &ErrUnsubscribeReceiptTimeout
 	}
 }
@@ -157,7 +141,7 @@ func (s *Subscription) closeChannel(msg *Message) {
 		}
 		atomic.StoreInt32(&s.state, subStateClosed)
 		close(s.C)
-		s.closeCond.Broadcast()
+		close(s.done)
 	})
 }
 
