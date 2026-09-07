@@ -67,8 +67,8 @@ func runFakeConn(c *C, operations ...serverOperation) (*sync.WaitGroup, *testuti
 	client, server := testutil.NewFakeConn(c)
 
 	wg := &sync.WaitGroup{}
+	wg.Add(1)
 	go func() {
-		wg.Add(1)
 		defer wg.Done()
 		reader := frame.NewReader(server)
 		writer := frame.NewWriter(server)
