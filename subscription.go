@@ -27,7 +27,7 @@ type Subscription struct {
 	destination               string
 	conn                      *Conn
 	ackMode                   AckMode
-	state                     int32
+	state                     atomic.Int32
 	done                      chan struct{}
 	closeOnce                 sync.Once
 	unsubscribeReceiptTimeout time.Duration
@@ -57,13 +57,13 @@ func (s *Subscription) AckMode() AckMode {
 // Active returns whether the subscription is still active.
 // Returns false if the subscription has been unsubscribed.
 func (s *Subscription) Active() bool {
-	return atomic.LoadInt32(&s.state) == subStateActive
+	return s.state.Load() == subStateActive
 }
 
 // Unsubscribes and closes the channel C.
 func (s *Subscription) Unsubscribe(opts ...func(*frame.Frame) error) error {
 	// transition to the "closing" state
-	if !atomic.CompareAndSwapInt32(&s.state, subStateActive, subStateClosing) {
+	if !s.state.CompareAndSwap(subStateActive, subStateClosing) {
 		return ErrCompletedSubscription
 	}
 
@@ -108,7 +108,7 @@ func (s *Subscription) Unsubscribe(opts ...func(*frame.Frame) error) error {
 	case <-time.After(s.unsubscribeReceiptTimeout):
 		// s.done closing can race with the timeout firing; closeChannel closes
 		// s.C before s.done, so re-check state to avoid sending on a closed s.C.
-		if atomic.LoadInt32(&s.state) == subStateClosed {
+		if s.state.Load() == subStateClosed {
 			return nil
 		}
 		msg := s.subscriptionErrorMessage("channel unsubscribe receipt timeout")
@@ -139,7 +139,7 @@ func (s *Subscription) closeChannel(msg *Message) {
 		if msg != nil {
 			s.C <- msg
 		}
-		atomic.StoreInt32(&s.state, subStateClosed)
+		s.state.Store(subStateClosed)
 		close(s.C)
 		close(s.done)
 	})
@@ -157,7 +157,7 @@ func (s *Subscription) readLoop(ch chan *frame.Frame) {
 	for {
 		f, ok := <-ch
 		if !ok {
-			state := atomic.LoadInt32(&s.state)
+			state := s.state.Load()
 			if state == subStateActive || state == subStateClosing {
 				msg := s.subscriptionErrorMessage("channel read failed")
 				s.closeChannel(msg)
@@ -179,7 +179,7 @@ func (s *Subscription) readLoop(ch chan *frame.Frame) {
 			}
 			s.C <- msg
 		case frame.ERROR:
-			state := atomic.LoadInt32(&s.state)
+			state := s.state.Load()
 			if state == subStateActive || state == subStateClosing {
 				message, _ := f.Header.Contains(frame.Message)
 				text := fmt.Sprintf("Subscription %s: %s: ERROR message:%s",
@@ -203,7 +203,7 @@ func (s *Subscription) readLoop(ch chan *frame.Frame) {
 			}
 			return
 		case frame.RECEIPT:
-			state := atomic.LoadInt32(&s.state)
+			state := s.state.Load()
 			if state == subStateActive || state == subStateClosing {
 				s.closeChannel(nil)
 			}
