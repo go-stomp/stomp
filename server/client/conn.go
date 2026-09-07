@@ -33,7 +33,6 @@ type Conn struct {
 	stateFunc      func(c *Conn, f *frame.Frame) error // State processing function
 	writeTimeout   time.Duration                       // Heart beat write timeout
 	version        stomp.Version                       // Negotiated STOMP protocol version
-	closed         bool                                // Is the connection closed
 	txStore        *txStore                            // Stores transactions in progress
 	lastMsgId      uint64                              // last message-id value
 	subList        *SubscriptionList                   // List of subscriptions requiring acknowledgement
@@ -624,12 +623,11 @@ func (c *Conn) handleSubscribe(f *frame.Frame) error {
 		ack = frame.AckAuto
 	}
 
-	sub, ok := c.subs[id]
-	if ok {
+	if _, ok := c.subs[id]; ok {
 		return subscriptionExists
 	}
 
-	sub = newSubscription(c, dest, id, ack)
+	sub := newSubscription(c, dest, id, ack)
 	c.subs[id] = sub
 
 	// send information about new subscription to upper layer

@@ -24,23 +24,6 @@ import (
 // TODO: experimenting with ways to gracefully shutdown the server,
 // at the moment it just dies ungracefully on SIGINT.
 
-/*
-
-func main() {
-	// create a channel for listening for termination signals
-	stopChannel := newStopChannel()
-
-	for {
-		select {
-		case sig := <-stopChannel:
-			log.Println("received signal:", sig)
-			break
-		}
-	}
-
-}
-*/
-
 var listenAddr = flag.String("addr", ":61613", "Listen address")
 var helpFlag = flag.Bool("help", false, "Show this help text")
 

@@ -17,7 +17,6 @@ type requestProcessor struct {
 	ch     chan client.Request
 	tm     *topic.Manager
 	qm     *queue.Manager
-	stop   bool // has stop been requested
 }
 
 func newRequestProcessor(server *Server) *requestProcessor {

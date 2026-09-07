@@ -2,10 +2,11 @@ package testutil
 
 import (
 	"errors"
-	. "gopkg.in/check.v1"
 	"io"
 	"net"
 	"time"
+
+	check "gopkg.in/check.v1"
 )
 
 type FakeAddr struct {
@@ -24,7 +25,7 @@ func (addr *FakeAddr) String() string {
 // the net.Conn interface and is useful for simulating I/O between
 // STOMP clients and a STOMP server.
 type FakeConn struct {
-	C            *C
+	C            *check.C
 	writer       io.WriteCloser
 	reader       io.ReadCloser
 	localAddr    net.Addr
@@ -39,7 +40,7 @@ var (
 
 // NewFakeConn returns a pair of fake connections suitable for
 // testing.
-func NewFakeConn(c *C) (client *FakeConn, server *FakeConn) {
+func NewFakeConn(c *check.C) (client *FakeConn, server *FakeConn) {
 	clientReader, serverWriter := io.Pipe()
 	serverReader, clientWriter := io.Pipe()
 	clientAddr := &FakeAddr{Value: "the-client:123"}
