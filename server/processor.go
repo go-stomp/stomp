@@ -107,7 +107,7 @@ func (proc *requestProcessor) Listen(l net.Listener) {
 	for {
 		rw, err := l.Accept()
 		if err != nil {
-			if netErr, ok := err.(net.Error); ok && netErr.Temporary() {
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 				if timeout == 0 {
 					timeout = 5 * time.Millisecond
 				} else {
