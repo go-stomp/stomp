@@ -310,7 +310,7 @@ func (c *Conn) processLoop() {
 				c.requestChannel <- Request{Op: RequeueOp, Frame: sub.frame}
 			}
 
-		case _ = <-timerChannel:
+		case <-timerChannel:
 			// stop the heart-beat timer
 			if timer != nil {
 				timer.Stop()

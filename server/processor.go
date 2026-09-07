@@ -91,8 +91,6 @@ func (proc *requestProcessor) Serve(l net.Listener) error {
 			}
 		}
 	}
-	// this is no longer required for go 1.1
-	panic("not reached")
 }
 
 func isQueueDestination(dest string) bool {
@@ -125,8 +123,6 @@ func (proc *requestProcessor) Listen(l net.Listener) {
 		// configuration parameters.
 		_ = client.NewConn(config, rw, proc.ch)
 	}
-	// This is no longer required for go 1.1
-	panic("not reached")
 }
 
 type config struct {
