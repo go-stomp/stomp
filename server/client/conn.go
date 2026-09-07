@@ -33,7 +33,6 @@ type Conn struct {
 	stateFunc      func(c *Conn, f *frame.Frame) error // State processing function
 	writeTimeout   time.Duration                       // Heart beat write timeout
 	version        stomp.Version                       // Negotiated STOMP protocol version
-	closed         bool                                // Is the connection closed
 	txStore        *txStore                            // Stores transactions in progress
 	lastMsgId      uint64                              // last message-id value
 	subList        *SubscriptionList                   // List of subscriptions requiring acknowledgement
@@ -121,9 +120,9 @@ func (c *Conn) readLoop() {
 	for {
 		if readTimeout == time.Duration(0) {
 			// infinite timeout
-			c.rw.SetReadDeadline(time.Time{})
+			_ = c.rw.SetReadDeadline(time.Time{})
 		} else {
-			c.rw.SetReadDeadline(time.Now().Add(readTimeout * 2))
+			_ = c.rw.SetReadDeadline(time.Now().Add(readTimeout * 2))
 		}
 		f, err := reader.Read()
 		if err != nil {
@@ -310,7 +309,7 @@ func (c *Conn) processLoop() {
 				c.requestChannel <- Request{Op: RequeueOp, Frame: sub.frame}
 			}
 
-		case _ = <-timerChannel:
+		case <-timerChannel:
 			// stop the heart-beat timer
 			if timer != nil {
 				timer.Stop()
@@ -366,7 +365,7 @@ func (c *Conn) cleanupConn() {
 	c.cleanupSubChannel()
 
 	// Should not hurt to call this if it is already closed?
-	c.rw.Close()
+	_ = c.rw.Close()
 }
 
 // Discard anything on the write channel. These frames
@@ -524,7 +523,9 @@ func (c *Conn) handleConnect(f *frame.Frame) error {
 		frame.Server, "stompd/x.y.z", // TODO: get version
 		frame.HeartBeat, fmt.Sprintf("%d,%d", cy, cx))
 
-	c.sendImmediately(response)
+	if err := c.sendImmediately(response); err != nil {
+		return err
+	}
 	c.stateFunc = connected
 
 	// tell the upper layer we are connected
@@ -624,12 +625,11 @@ func (c *Conn) handleSubscribe(f *frame.Frame) error {
 		ack = frame.AckAuto
 	}
 
-	sub, ok := c.subs[id]
-	if ok {
+	if _, ok := c.subs[id]; ok {
 		return subscriptionExists
 	}
 
-	sub = newSubscription(c, dest, id, ack)
+	sub := newSubscription(c, dest, id, ack)
 	c.subs[id] = sub
 
 	// send information about new subscription to upper layer

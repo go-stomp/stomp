@@ -17,7 +17,6 @@ type requestProcessor struct {
 	ch     chan client.Request
 	tm     *topic.Manager
 	qm     *queue.Manager
-	stop   bool // has stop been requested
 }
 
 func newRequestProcessor(server *Server) *requestProcessor {
@@ -45,8 +44,9 @@ func (proc *requestProcessor) Serve(l net.Listener) error {
 		case client.SubscribeOp:
 			if isQueueDestination(r.Sub.Destination()) {
 				queue := proc.qm.Find(r.Sub.Destination())
-				// todo error handling
-				queue.Subscribe(r.Sub)
+				if err := queue.Subscribe(r.Sub); err != nil {
+					proc.server.Log.Errorf("failed to subscribe %s: %v", r.Sub.Destination(), err)
+				}
 			} else {
 				topic := proc.tm.Find(r.Sub.Destination())
 				topic.Subscribe(r.Sub)
@@ -71,7 +71,9 @@ func (proc *requestProcessor) Serve(l net.Listener) error {
 
 			if isQueueDestination(destination) {
 				queue := proc.qm.Find(destination)
-				queue.Enqueue(r.Frame)
+				if err := queue.Enqueue(r.Frame); err != nil {
+					proc.server.Log.Errorf("failed to enqueue to %s: %v", destination, err)
+				}
 			} else {
 				topic := proc.tm.Find(destination)
 				topic.Enqueue(r.Frame)
@@ -87,12 +89,12 @@ func (proc *requestProcessor) Serve(l net.Listener) error {
 			// only requeue to queues, should never happen for topics
 			if isQueueDestination(destination) {
 				queue := proc.qm.Find(destination)
-				queue.Requeue(r.Frame)
+				if err := queue.Requeue(r.Frame); err != nil {
+					proc.server.Log.Errorf("failed to requeue to %s: %v", destination, err)
+				}
 			}
 		}
 	}
-	// this is no longer required for go 1.1
-	panic("not reached")
 }
 
 func isQueueDestination(dest string) bool {
@@ -125,8 +127,6 @@ func (proc *requestProcessor) Listen(l net.Listener) {
 		// configuration parameters.
 		_ = client.NewConn(config, rw, proc.ch)
 	}
-	// This is no longer required for go 1.1
-	panic("not reached")
 }
 
 type config struct {

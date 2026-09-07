@@ -32,7 +32,7 @@ func (s *ChannelSuite) TestChannelWhenClosed(c *C) {
 	}
 
 	select {
-	case _ = <-ch:
+	case <-ch:
 		c.Error("not expecting anything on the channel")
 	default:
 	}
@@ -73,15 +73,15 @@ func (s *ChannelSuite) TestMultipleChannels(c *C) {
 	case i, ok := <-ch1:
 		c.Assert(i, Equals, 1)
 		c.Assert(ok, Equals, true)
-	case _ = <-ch2:
+	case <-ch2:
 	default:
 		c.Error("expected value on channel")
 	}
 
 	select {
-	case _ = <-ch1:
+	case <-ch1:
 		c.Error("not expected")
-	case _ = <-ch2:
+	case <-ch2:
 		c.Error("not expected")
 	default:
 	}

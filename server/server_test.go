@@ -31,8 +31,8 @@ func (s *ServerSuite) TestConnectAndDisconnect(c *C) {
 	addr := ":59091"
 	l, err := net.Listen("tcp", addr)
 	c.Assert(err, IsNil)
-	defer func() { l.Close() }()
-	go Serve(l)
+	defer func() { _ = l.Close() }()
+	go func() { _ = Serve(l) }()
 
 	conn, err := net.Dial("tcp", "127.0.0.1"+addr)
 	c.Assert(err, IsNil)
@@ -43,7 +43,7 @@ func (s *ServerSuite) TestConnectAndDisconnect(c *C) {
 	err = client.Disconnect()
 	c.Assert(err, IsNil)
 
-	conn.Close()
+	_ = conn.Close()
 }
 
 
@@ -52,24 +52,24 @@ func (s *ServerSuite) TestHeartBeatingTolerance(c *C) {
 	//  it should add a pretty decent amount of time to counter network delay of other timing issues
 	l, err := net.Listen("tcp", `127.0.0.1:0`)
 	c.Assert(err, IsNil)
-	defer func() { l.Close() }()
+	defer func() { _ = l.Close() }()
 	serv := Server{
 		Addr:          l.Addr().String(),
 		Authenticator: nil,
 		QueueStorage:  nil,
 		HeartBeat:     50 * time.Millisecond,
 	}
-	go serv.Serve(l)
+	go func() { _ = serv.Serve(l) }()
 
 	conn, err := net.Dial("tcp", l.Addr().String())
 	c.Assert(err, IsNil)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	client, err := stomp.Connect(conn,
 		stomp.ConnOpt.HeartBeat(50*time.Millisecond, 50*time.Millisecond),
 	)
 	c.Assert(err, IsNil)
-	defer client.Disconnect()
+	defer func() { _ = client.Disconnect() }()
 
 	time.Sleep(serv.HeartBeat * 20) // let it go for some time to allow client and server to exchange some heart beat
 
@@ -86,8 +86,8 @@ func (s *ServerSuite) TestSendToQueuesAndTopics(c *C) {
 
 	l, err := net.Listen("tcp", addr)
 	c.Assert(err, IsNil)
-	defer func() { l.Close() }()
-	go Serve(l)
+	defer func() { _ = l.Close() }()
+	go func() { _ = Serve(l) }()
 
 	// channel to communicate that the go routine has started
 	started := make(chan bool)
@@ -139,8 +139,9 @@ func runSender(c *C, ch chan bool, count int, destination, addr string, started 
 	started <- true
 
 	for i := 0; i < count; i++ {
-		client.Send(destination, "text/plain",
+		err := client.Send(destination, "text/plain",
 			[]byte(fmt.Sprintf("%s test message %d", destination, i)))
+		c.Assert(err, IsNil)
 		//println("sent", i)
 	}
 

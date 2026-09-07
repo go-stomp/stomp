@@ -18,8 +18,8 @@ func (s *StompSuite) Test_successful_unsubscribe_with_receipt_timeout(c *C) {
 		assertSubscribeFrame,
 		assertUnsubscribeFrame,
 	)
-	defer fc1.Close()
-	defer fc2.Close()
+	defer func() { _ = fc1.Close() }()
+	defer func() { _ = fc2.Close() }()
 
 	client, err := Connect(fc1, ConnOpt.UnsubscribeReceiptTimeout(1*time.Second))
 	c.Assert(err, IsNil)
@@ -44,8 +44,8 @@ func (s *StompSuite) Test_successful_unsubscribe_no_timeout(c *C) {
 		assertUnsubscribeFrame,
 		sendReceiptFrame(3),
 	)
-	defer fc1.Close()
-	defer fc2.Close()
+	defer func() { _ = fc1.Close() }()
+	defer func() { _ = fc2.Close() }()
 
 	client, err := Connect(fc1)
 	c.Assert(err, IsNil)
@@ -67,8 +67,8 @@ func runFakeConn(c *C, operations ...serverOperation) (*sync.WaitGroup, *testuti
 	client, server := testutil.NewFakeConn(c)
 
 	wg := &sync.WaitGroup{}
+	wg.Add(1)
 	go func() {
-		wg.Add(1)
 		defer wg.Done()
 		reader := frame.NewReader(server)
 		writer := frame.NewWriter(server)

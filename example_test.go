@@ -95,7 +95,10 @@ func ExampleConn_Subscribe() {
 		handle(err)
 	}
 
-	conn.Disconnect()
+	err = conn.Disconnect()
+	if err != nil {
+		handle(err)
+	}
 }
 
 // Example of creating subscriptions with various options.
@@ -126,7 +129,11 @@ func ExampleTransaction() {
 	if err != nil {
 		handle(err)
 	}
-	defer conn.Disconnect()
+	defer func() {
+		if err := conn.Disconnect(); err != nil {
+			handle(err)
+		}
+	}()
 
 	sub, err := conn.Subscribe("/queue/test-2", stomp.AckClient)
 	if err != nil {
@@ -144,8 +151,11 @@ func ExampleTransaction() {
 
 		doAnotherThingWith(msg, tx)
 
-		tx.Send("/queue/another-one", "text/plain",
+		err = tx.Send("/queue/another-one", "text/plain",
 			[]byte(fmt.Sprintf("Message #%d", i)), nil)
+		if err != nil {
+			handle(err)
+		}
 
 		// acknowledge the message
 		err = tx.Ack(msg)
@@ -178,7 +188,11 @@ func ExampleConnect() {
 		handle(err)
 	}
 
-	defer stompConn.Disconnect()
+	defer func() {
+		if err := stompConn.Disconnect(); err != nil {
+			handle(err)
+		}
+	}()
 
 	doSomethingWith(stompConn)
 }
@@ -198,7 +212,10 @@ func ExampleDial() {
 		handle(err)
 	}
 
-	conn.Disconnect()
+	err = conn.Disconnect()
+	if err != nil {
+		handle(err)
+	}
 }
 
 // Connect to a STOMP server that requires authentication. In addition,
@@ -224,5 +241,8 @@ func ExampleDial_with_options() {
 		handle(err)
 	}
 
-	conn.Disconnect()
+	err = conn.Disconnect()
+	if err != nil {
+		handle(err)
+	}
 }

@@ -23,7 +23,7 @@ func (s *FakeConnSuite) TestFakeConn(c *C) {
 
 	go func() {
 		defer func() {
-			fc2.Close()
+			_ = fc2.Close()
 			close(stop)
 		}()
 

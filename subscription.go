@@ -165,7 +165,8 @@ func (s *Subscription) readLoop(ch chan *frame.Frame) {
 			return
 		}
 
-		if f.Command == frame.MESSAGE {
+		switch f.Command {
+		case frame.MESSAGE:
 			destination := f.Header.Get(frame.Destination)
 			contentType := f.Header.Get(frame.ContentType)
 			msg := &Message{
@@ -177,7 +178,7 @@ func (s *Subscription) readLoop(ch chan *frame.Frame) {
 				Body:         f.Body,
 			}
 			s.C <- msg
-		} else if f.Command == frame.ERROR {
+		case frame.ERROR:
 			state := atomic.LoadInt32(&s.state)
 			if state == subStateActive || state == subStateClosing {
 				message, _ := f.Header.Contains(frame.Message)
@@ -201,13 +202,13 @@ func (s *Subscription) readLoop(ch chan *frame.Frame) {
 				s.closeChannel(msg)
 			}
 			return
-		} else if f.Command == frame.RECEIPT {
+		case frame.RECEIPT:
 			state := atomic.LoadInt32(&s.state)
 			if state == subStateActive || state == subStateClosing {
 				s.closeChannel(nil)
 			}
 			return
-		} else {
+		default:
 			s.conn.log.Infof("Subscription %s: %s: unsupported frame type: %+v", s.id, s.destination, f)
 		}
 	}
