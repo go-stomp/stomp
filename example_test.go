@@ -55,11 +55,11 @@ func ExampleNewHeader() {
 	doSomethingWith(h)
 }
 
-func doSomethingWith(f ...interface{}) {
+func doSomethingWith(f ...any) {
 
 }
 
-func doAnotherThingWith(f interface{}, g interface{}) {
+func doAnotherThingWith(f any, g any) {
 
 }
 
