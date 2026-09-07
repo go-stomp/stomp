@@ -47,10 +47,11 @@ func (s *TxStoreSuite) TestSuccessfulTx(c *C) {
 	err = txs.Add("tx1", f3)
 	c.Assert(err, IsNil)
 	err = txs.Add("tx2", f4)
+	c.Assert(err, IsNil)
 
 	var tx1 []*frame.Frame
 
-	txs.Commit("tx1", func(f *frame.Frame) error {
+	err = txs.Commit("tx1", func(f *frame.Frame) error {
 		tx1 = append(tx1, f)
 		return nil
 	})

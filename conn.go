@@ -78,7 +78,7 @@ func DialWithContext(ctx context.Context, network, addr string, opts ...func(*Co
 
 	host, _, err := net.SplitHostPort(c.RemoteAddr().String())
 	if err != nil {
-		c.Close()
+		_ = c.Close()
 		return nil, err
 	}
 
@@ -164,7 +164,9 @@ func ConnectWithContext(ctx context.Context, conn io.ReadWriteCloser, opts ...fu
 	connection, isNetConn := conn.(net.Conn)
 	deadline, ok := ctx.Deadline()
 	if ok && isNetConn {
-		connection.SetReadDeadline(deadline)
+		if err := connection.SetReadDeadline(deadline); err != nil {
+			return nil, err
+		}
 	}
 
 	response, err := reader.Read()
@@ -173,7 +175,9 @@ func ConnectWithContext(ctx context.Context, conn io.ReadWriteCloser, opts ...fu
 	}
 	// Restore Conn-level deadlines
 	if ok && isNetConn {
-		connection.SetReadDeadline(time.Time{})
+		if err := connection.SetReadDeadline(time.Time{}); err != nil {
+			return nil, err
+		}
 	}
 	if response == nil {
 		return nil, errors.New("unexpected empty frame")
@@ -311,7 +315,11 @@ func processLoop(c *Conn, writer *frame.Writer) {
 	var writeTimeoutChannel <-chan time.Time
 	var writeTimer *time.Timer
 
-	defer c.MustDisconnect()
+	defer func() {
+		if err := c.MustDisconnect(); err != nil {
+			c.log.Errorf("error disconnecting: %v", err)
+		}
+	}()
 
 	for {
 		if c.readTimeout > 0 && readTimer == nil {
@@ -383,7 +391,9 @@ func processLoop(c *Conn, writer *frame.Writer) {
 				c.closeMutex.Lock()
 				defer c.closeMutex.Unlock()
 				c.closed = true
-				c.conn.Close()
+				if err := c.conn.Close(); err != nil {
+					c.log.Errorf("error closing connection: %v", err)
+				}
 
 				return
 
@@ -646,7 +656,7 @@ func (c *Conn) sendFrame(f *frame.Frame) error {
 	c.closeMutex.Lock()
 	if c.closed {
 		c.closeMutex.Unlock()
-		c.conn.Close()
+		_ = c.conn.Close()
 		return ErrClosedUnexpectedly
 	}
 
@@ -714,7 +724,7 @@ func (c *Conn) Subscribe(destination string, ack AckMode, opts ...func(*frame.Fr
 	c.closeMutex.Lock()
 	defer c.closeMutex.Unlock()
 	if c.closed {
-		c.conn.Close()
+		_ = c.conn.Close()
 		return nil, ErrClosedUnexpectedly
 	}
 

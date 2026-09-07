@@ -120,9 +120,9 @@ func (c *Conn) readLoop() {
 	for {
 		if readTimeout == time.Duration(0) {
 			// infinite timeout
-			c.rw.SetReadDeadline(time.Time{})
+			_ = c.rw.SetReadDeadline(time.Time{})
 		} else {
-			c.rw.SetReadDeadline(time.Now().Add(readTimeout * 2))
+			_ = c.rw.SetReadDeadline(time.Now().Add(readTimeout * 2))
 		}
 		f, err := reader.Read()
 		if err != nil {
@@ -365,7 +365,7 @@ func (c *Conn) cleanupConn() {
 	c.cleanupSubChannel()
 
 	// Should not hurt to call this if it is already closed?
-	c.rw.Close()
+	_ = c.rw.Close()
 }
 
 // Discard anything on the write channel. These frames
@@ -523,7 +523,9 @@ func (c *Conn) handleConnect(f *frame.Frame) error {
 		frame.Server, "stompd/x.y.z", // TODO: get version
 		frame.HeartBeat, fmt.Sprintf("%d,%d", cy, cx))
 
-	c.sendImmediately(response)
+	if err := c.sendImmediately(response); err != nil {
+		return err
+	}
 	c.stateFunc = connected
 
 	// tell the upper layer we are connected

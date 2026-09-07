@@ -36,8 +36,8 @@ func (s *StompSuite) Test_conn_option_set_logger(c *C) {
 	go func() {
 
 		defer func() {
-			fc2.Close()
-			fc1.Close()
+			_ = fc2.Close()
+			_ = fc1.Close()
 		}()
 
 		reader := frame.NewReader(fc2)
@@ -66,7 +66,7 @@ func (s *StompSuite) Test_unsuccessful_connect(c *C) {
 
 	go func() {
 		defer func() {
-			fc2.Close()
+			_ = fc2.Close()
 			close(stop)
 		}()
 
@@ -124,7 +124,7 @@ func (s *StompSuite) Test_successful_connect_and_disconnect(c *C) {
 
 		go func() {
 			defer func() {
-				fc2.Close()
+				_ = fc2.Close()
 				close(stop)
 			}()
 			reader := frame.NewReader(fc2)
@@ -193,7 +193,7 @@ func (s *StompSuite) Test_successful_connect_get_headers(c *C) {
 
 		go func() {
 			defer func() {
-				fc2.Close()
+				_ = fc2.Close()
 				close(stop)
 			}()
 			reader := frame.NewReader(fc2)
@@ -241,7 +241,7 @@ func (s *StompSuite) Test_successful_connect_with_nonstandard_header(c *C) {
 
 	go func() {
 		defer func() {
-			fc2.Close()
+			_ = fc2.Close()
 			close(stop)
 		}()
 		reader := frame.NewReader(fc2)
@@ -295,7 +295,7 @@ func (s *StompSuite) Test_connect_not_panic_on_empty_response(c *C) {
 
 	go func() {
 		defer func() {
-			fc2.Close()
+			_ = fc2.Close()
 			close(stop)
 		}()
 		reader := frame.NewReader(fc2)
@@ -309,7 +309,7 @@ func (s *StompSuite) Test_connect_not_panic_on_empty_response(c *C) {
 	c.Assert(err, NotNil)
 	c.Assert(client, IsNil)
 
-	fc1.Close()
+	_ = fc1.Close()
 	<-stop
 }
 
@@ -318,7 +318,7 @@ func (s *StompSuite) Test_successful_disconnect_with_receipt_timeout(c *C) {
 	fc1, fc2 := testutil.NewFakeConn(c)
 
 	defer func() {
-		fc2.Close()
+		_ = fc2.Close()
 	}()
 
 	go func() {
@@ -391,7 +391,7 @@ func subscribeHelper(c *C, ackMode AckMode, version Version, opts ...func(*frame
 
 	go func() {
 		defer func() {
-			rw.Close()
+			_ = rw.Close()
 			close(stop)
 		}()
 
@@ -503,7 +503,7 @@ func subscribeTransactionHelper(c *C, ackMode AckMode, version Version, abort bo
 
 	go func() {
 		defer func() {
-			rw.Close()
+			_ = rw.Close()
 			close(stop)
 		}()
 
@@ -796,7 +796,7 @@ func (s *StompSuite) Test_ConnectWithContext(c *C) {
 
 	go func() {
 		buff := make([]byte, 1024)
-		fc2.Read(buff)
+		_, _ = fc2.Read(buff)
 	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
