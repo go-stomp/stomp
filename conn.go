@@ -58,8 +58,8 @@ type Conn struct {
 	closeMutex                *sync.Mutex
 	options                   *connOptions
 	log                       Logger
-	writesSent                int64
-	readsReceived             int64
+	writesSent                atomic.Int64
+	readsReceived             atomic.Int64
 	statsEnabled              bool
 }
 
@@ -295,8 +295,8 @@ func (c *Conn) Stats() ConnectionStats {
 	return ConnectionStats{
 		CurrentWriteChanSize: len(c.writeCh),
 		CurrentReadChanSize:  len(c.readCh),
-		WritesSent:           atomic.LoadInt64(&c.writesSent),
-		ReadsReceived:        atomic.LoadInt64(&c.readsReceived),
+		WritesSent:           c.writesSent.Load(),
+		ReadsReceived:        c.readsReceived.Load(),
 	}
 }
 
@@ -311,7 +311,7 @@ func readLoop(c *Conn, reader *frame.Reader) {
 			return
 		}
 		if c.statsEnabled {
-			atomic.AddInt64(&c.readsReceived, 1)
+			c.readsReceived.Add(1)
 		}
 		c.readCh <- f
 	}
@@ -506,7 +506,7 @@ func (c *Conn) Disconnect() error {
 	}
 
 	if c.statsEnabled {
-		atomic.AddInt64(&c.writesSent, 1)
+		c.writesSent.Add(1)
 	}
 
 	ch := make(chan *frame.Frame)
@@ -576,7 +576,7 @@ func (c *Conn) Send(destination, contentType string, body []byte, opts ...func(*
 	}
 
 	if c.statsEnabled {
-		atomic.AddInt64(&c.writesSent, 1)
+		c.writesSent.Add(1)
 	}
 
 	if _, ok := f.Header.Contains(frame.Receipt); ok {
@@ -675,7 +675,7 @@ func (c *Conn) sendFrame(f *frame.Frame) error {
 	}
 
 	if c.statsEnabled {
-		atomic.AddInt64(&c.writesSent, 1)
+		c.writesSent.Add(1)
 	}
 
 	if _, ok := f.Header.Contains(frame.Receipt); ok {
@@ -810,7 +810,7 @@ func (c *Conn) Subscribe(destination string, ack AckMode, opts ...func(*frame.Fr
 	go sub.readLoop(ch)
 
 	if c.statsEnabled {
-		atomic.AddInt64(&c.writesSent, 1)
+		c.writesSent.Add(1)
 	}
 
 	// TODO is this safe? There is no check if writeCh is actually open.
