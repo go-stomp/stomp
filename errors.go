@@ -21,7 +21,7 @@ var (
 	ErrDisconnectReceiptTimeout      = newErrorMessage("disconnect receipt timeout")
 	ErrUnsubscribeReceiptTimeout     = newErrorMessage("unsubscribe receipt timeout")
 	ErrSubscribeReceiptTimeout       = newErrorMessage("subscribe receipt timeout")
-	ErrReceiptNotSupportedForReplyTo = newErrorMessage("SubscribeOpt.Receipt is not supported for reply-to subscriptions")
+	ErrReceiptNotSupportedForReplyTo = newErrorMessage("receipt is not supported for reply-to subscriptions")
 	ErrNilOption                     = newErrorMessage("nil option")
 )
 
