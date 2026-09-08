@@ -734,6 +734,10 @@ func (c *Conn) sendFrame(f *frame.Frame) error {
 // The subscription has a destination, and messages sent to that destination
 // will be received by this subscription. A subscription has a channel
 // on which the calling program can receive messages.
+//
+// If SubscribeOpt.Receipt is used and confirmation doesn't arrive within
+// ConnOpt.SubscribeReceiptTimeout, Subscribe unsubscribes again and returns
+// ErrSubscribeReceiptTimeout.
 func (c *Conn) Subscribe(destination string, ack AckMode, opts ...func(*frame.Frame) error) (*Subscription, error) {
 	// Not deferred: released before waiting on the receipt below, so a slow
 	// server doesn't stall other operations on this connection.

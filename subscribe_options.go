@@ -25,9 +25,6 @@ var SubscribeOpt struct {
 	// receiptId is the value of the "receipt" header sent to the server. If
 	// left empty, a unique value is generated.
 	//
-	// If confirmation doesn't arrive within ConnOpt.SubscribeReceiptTimeout,
-	// Subscribe unsubscribes again and returns ErrSubscribeReceiptTimeout.
-	//
 	// Reply-to (temporary queue) subscriptions are never sent to the server
 	// and so cannot be confirmed: using Receipt with one makes Subscribe
 	// return ErrReceiptNotSupportedForReplyTo.
