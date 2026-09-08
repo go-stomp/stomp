@@ -20,14 +20,19 @@ const DefaultHeartBeatError = 5 * time.Second
 // Default send timeout in Conn.Send function
 const DefaultMsgSendTimeout = 10 * time.Second
 
+const defaultReceiptTimeout = 30 * time.Second
+
 // Default receipt timeout in Conn.Send function
-const DefaultRcvReceiptTimeout = 30 * time.Second
+const DefaultRcvReceiptTimeout = defaultReceiptTimeout
 
 // Default receipt timeout in Conn.Disconnect function
-const DefaultDisconnectReceiptTimeout = 30 * time.Second
+const DefaultDisconnectReceiptTimeout = defaultReceiptTimeout
 
 // Default receipt timeout in Subscription.Unsubscribe function
-const DefaultUnsubscribeReceiptTimeout = 30 * time.Second
+const DefaultUnsubscribeReceiptTimeout = defaultReceiptTimeout
+
+// Default receipt timeout in Conn.Subscribe function, when SubscribeOpt.Receipt is used
+const DefaultSubscribeReceiptTimeout = defaultReceiptTimeout
 
 // Reply-To header used for temporary queues/RPC with rabbit.
 const ReplyToHeader = "reply-to"
@@ -47,6 +52,7 @@ type Conn struct {
 	rcvReceiptTimeout         time.Duration
 	disconnectReceiptTimeout  time.Duration
 	unsubscribeReceiptTimeout time.Duration
+	subscribeReceiptTimeout   time.Duration
 	hbGracePeriodMultiplier   float64
 	closed                    bool
 	closeMutex                *sync.Mutex
@@ -60,6 +66,11 @@ type Conn struct {
 type writeRequest struct {
 	Frame *frame.Frame      // frame to send
 	C     chan *frame.Frame // response channel
+
+	// ReceiptC, if non-nil, receives a resulting RECEIPT frame instead of C.
+	// Used by SUBSCRIBE requests, where C is the subscription's own message
+	// channel and must not be closed by the RECEIPT.
+	ReceiptC chan *frame.Frame
 }
 
 // Dial creates a network connection to a STOMP server and performs
@@ -236,6 +247,7 @@ func ConnectWithContext(ctx context.Context, conn io.ReadWriteCloser, opts ...fu
 	c.rcvReceiptTimeout = options.RcvReceiptTimeout
 	c.disconnectReceiptTimeout = options.DisconnectReceiptTimeout
 	c.unsubscribeReceiptTimeout = options.UnsubscribeReceiptTimeout
+	c.subscribeReceiptTimeout = options.SubscribeReceiptTimeout
 
 	if options.ResponseHeadersCallback != nil {
 		options.ResponseHeadersCallback(response.Header)
@@ -418,8 +430,10 @@ func processLoop(c *Conn, writer *frame.Writer) {
 				sendError(channels, errors.New("write channel closed"))
 				return
 			}
-			if req.C != nil {
-				if receipt, ok := req.Frame.Header.Contains(frame.Receipt); ok {
+			if receipt, ok := req.Frame.Header.Contains(frame.Receipt); ok {
+				if req.ReceiptC != nil {
+					channels[receipt] = req.ReceiptC
+				} else if req.C != nil {
 					// remember the channel for this receipt
 					channels[receipt] = req.C
 				}
@@ -720,10 +734,16 @@ func (c *Conn) sendFrame(f *frame.Frame) error {
 // The subscription has a destination, and messages sent to that destination
 // will be received by this subscription. A subscription has a channel
 // on which the calling program can receive messages.
+//
+// If SubscribeOpt.Receipt is used and confirmation doesn't arrive within
+// ConnOpt.SubscribeReceiptTimeout, Subscribe unsubscribes again and returns
+// ErrSubscribeReceiptTimeout.
 func (c *Conn) Subscribe(destination string, ack AckMode, opts ...func(*frame.Frame) error) (*Subscription, error) {
+	// Not deferred: released before waiting on the receipt below, so a slow
+	// server doesn't stall other operations on this connection.
 	c.closeMutex.Lock()
-	defer c.closeMutex.Unlock()
 	if c.closed {
+		c.closeMutex.Unlock()
 		_ = c.conn.Close()
 		return nil, ErrClosedUnexpectedly
 	}
@@ -740,6 +760,7 @@ func (c *Conn) Subscribe(destination string, ack AckMode, opts ...func(*frame.Fr
 		}
 		err := opt(subscribeFrame)
 		if err != nil {
+			c.closeMutex.Unlock()
 			return nil, err
 		}
 	}
@@ -748,6 +769,13 @@ func (c *Conn) Subscribe(destination string, ack AckMode, opts ...func(*frame.Fr
 
 	if replyToSet {
 		subscribeFrame.Header.Set(frame.Id, replyTo)
+
+		// Reply-to subscriptions are never sent to the server, so no RECEIPT
+		// can ever arrive for one.
+		if _, ok := subscribeFrame.Header.Contains(frame.Receipt); ok {
+			c.closeMutex.Unlock()
+			return nil, ErrReceiptNotSupportedForReplyTo
+		}
 	}
 
 	// If the option functions have not specified the "id" header entry,
@@ -761,6 +789,12 @@ func (c *Conn) Subscribe(destination string, ack AckMode, opts ...func(*frame.Fr
 	request := writeRequest{
 		Frame: subscribeFrame,
 		C:     ch,
+	}
+
+	var receiptC chan *frame.Frame
+	if _, ok := subscribeFrame.Header.Contains(frame.Receipt); ok {
+		receiptC = make(chan *frame.Frame, 1)
+		request.ReceiptC = receiptC
 	}
 
 	sub := &Subscription{
@@ -782,8 +816,21 @@ func (c *Conn) Subscribe(destination string, ack AckMode, opts ...func(*frame.Fr
 	// TODO is this safe? There is no check if writeCh is actually open.
 	err := sendDataToWriteChWithTimeout(c.writeCh, request, c.msgSendTimeout)
 	if err != nil {
+		c.closeMutex.Unlock()
+		// Request never reached processLoop; readLoop would otherwise block on ch forever.
+		close(ch)
 		return nil, err
 	}
+	c.closeMutex.Unlock()
+
+	if receiptC != nil {
+		if err := readReceiptWithTimeout(receiptC, c.subscribeReceiptTimeout, ErrSubscribeReceiptTimeout); err != nil {
+			// The caller gets no handle to sub, so tear it down here or it leaks.
+			sub.abandon()
+			return nil, err
+		}
+	}
+
 	return sub, nil
 }
 

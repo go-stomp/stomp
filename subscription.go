@@ -117,6 +117,41 @@ func (s *Subscription) Unsubscribe(opts ...func(*frame.Frame) error) error {
 	}
 }
 
+// abandon tears down a subscription that Conn.Subscribe created but never
+// handed to the caller, because it failed while waiting for the confirming
+// RECEIPT. Unlike Unsubscribe, it doesn't wait for the RECEIPT itself: there
+// is nobody left to report the outcome to.
+//
+// If the broker never confirms the resulting UNSUBSCRIBE either, the drain
+// goroutine started below (and C itself) is only reclaimed when the
+// connection closes.
+func (s *Subscription) abandon() {
+	// transition to the "closing" state
+	if !atomic.CompareAndSwapInt32(&s.state, subStateActive, subStateClosing) {
+		return
+	}
+
+	// Nobody holds this subscription, so nobody will ever read C. Drain it
+	// until readLoop closes it, or messages already in flight would fill C,
+	// block readLoop on the frame channel and wedge processLoop with it.
+	go func() {
+		for range s.C {
+		}
+	}()
+
+	f := frame.New(frame.UNSUBSCRIBE, frame.Id, s.id)
+	if s.replyToSet {
+		f.Header.Set(ReplyToHeader, s.id)
+	}
+
+	if err := s.conn.sendFrame(f); err != nil {
+		// Nothing more we can do; the frame channel (and with it C) is closed
+		// when the connection is torn down.
+		s.conn.log.Infof("could not unsubscribe unconfirmed subscription %s: %s: %v",
+			s.id, s.destination, err)
+	}
+}
+
 // Read a message from the subscription. This is a convenience
 // method: many callers will prefer to read from the channel C
 // directly.
