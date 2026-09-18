@@ -349,7 +349,7 @@ func (s *StompSuite) Test_subscribe_receipt_timeout(c *C) {
 
 	go func() {
 		defer func() {
-			fc2.Close()
+			_ = fc2.Close()
 			close(stop)
 		}()
 
@@ -411,7 +411,7 @@ func (s *StompSuite) Test_subscribe_abandon_does_not_wedge_connection(c *C) {
 
 	go func() {
 		defer func() {
-			fc2.Close()
+			_ = fc2.Close()
 			close(stop)
 		}()
 
@@ -487,7 +487,7 @@ func (s *StompSuite) Test_subscribe_reply_to_rejects_receipt(c *C) {
 
 	go func() {
 		defer func() {
-			fc2.Close()
+			_ = fc2.Close()
 			close(stop)
 		}()
 
@@ -574,7 +574,7 @@ func (s *StompSuite) Test_subscribe_with_receipt(c *C) {
 
 	go func() {
 		defer func() {
-			rw.Close()
+			_ = rw.Close()
 			close(stop)
 		}()
 

@@ -1,10 +1,10 @@
 package stomp
 
 type Logger interface {
-	Debugf(format string, value ...interface{})
-	Infof(format string, value ...interface{})
-	Warningf(format string, value ...interface{})
-	Errorf(format string, value ...interface{})
+	Debugf(format string, value ...any)
+	Infof(format string, value ...any)
+	Warningf(format string, value ...any)
+	Errorf(format string, value ...any)
 
 	Debug(message string)
 	Info(message string)
