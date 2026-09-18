@@ -281,7 +281,7 @@ func TestStompSuccessfulConnectWithNonstandardHeader(t *testing.T) {
 	require.Equal(t, "RabbitMQ/3.2.1", client.Server())
 
 	err = client.Disconnect()
-	require.NotNil(t, client)
+	require.NoError(t, err)
 
 	<-stop
 }

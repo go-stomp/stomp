@@ -45,7 +45,7 @@ func TestTxStoreSuccessfulTx(t *testing.T) {
 	err = txs.Add("tx1", f3)
 	require.NoError(t, err)
 	err = txs.Add("tx2", f4)
-	c.Assert(err, IsNil)
+	require.NoError(t, err)
 
 	var tx1 []*frame.Frame
 
