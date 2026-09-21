@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sync"
 	"testing"
 	"time"
 
@@ -1017,6 +1018,33 @@ func TestStompZeroTimeout(t *testing.T) {
 	err := readReceiptWithTimeout(request.C, timeout, ErrMsgReceiptTimeout)
 
 	require.NoError(t, err)
+}
+
+func TestConnAllocateID(t *testing.T) {
+	c := &Conn{}
+
+	require.Equal(t, "1", c.AllocateID())
+	require.Equal(t, "2", c.AllocateID())
+
+	const goroutines = 50
+	const perGoroutine = 100
+
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+			for j := 0; j < perGoroutine; j++ {
+				_ = c.AllocateID()
+			}
+		}()
+	}
+	wg.Wait()
+
+	require.Equal(t, "5003", c.AllocateID())
+
+	other := &Conn{}
+	require.Equal(t, "1", other.AllocateID(), "each Conn must have its own id sequence")
 }
 
 func TestStompConnectWithContext(t *testing.T) {
