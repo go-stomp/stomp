@@ -59,6 +59,9 @@ func init() {
 				return ErrInvalidCommand
 			}
 			if receiptId == "" {
+				if f.Conn == nil {
+					return ErrFrameHasNoConnection
+				}
 				receiptId = f.Conn.AllocateID()
 			}
 			f.Header.Set(frame.Receipt, receiptId)

@@ -30,6 +30,9 @@ func init() {
 		if f.Command != frame.SEND {
 			return ErrInvalidCommand
 		}
+		if f.Conn == nil {
+			return ErrFrameHasNoConnection
+		}
 		id := f.Conn.AllocateID()
 		f.Header.Set(frame.Receipt, id)
 		return nil
