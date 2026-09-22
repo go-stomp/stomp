@@ -8,14 +8,18 @@ import (
 	"github.com/go-stomp/stomp/v3/frame"
 )
 
-func TestSendOptReceiptWithoutConnReturnsError(t *testing.T) {
+func TestSendOptReceiptSetsPlaceholderWithoutConn(t *testing.T) {
 	f := frame.New(frame.SEND)
 	err := SendOpt.Receipt(f)
-	require.ErrorIs(t, err, ErrFrameHasNoConnection)
+	require.NoError(t, err)
+	id, _ := f.Header.Contains(frame.Receipt)
+	require.Equal(t, pendingReceiptID, id)
 }
 
-func TestSubscribeOptReceiptWithoutConnReturnsError(t *testing.T) {
+func TestSubscribeOptReceiptSetsPlaceholderWithoutConn(t *testing.T) {
 	f := frame.New(frame.SUBSCRIBE)
 	err := SubscribeOpt.Receipt("")(f)
-	require.ErrorIs(t, err, ErrFrameHasNoConnection)
+	require.NoError(t, err)
+	id, _ := f.Header.Contains(frame.Receipt)
+	require.Equal(t, pendingReceiptID, id)
 }

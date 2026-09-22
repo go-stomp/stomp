@@ -642,16 +642,18 @@ func sendDataToWriteChWithTimeout(ch chan writeRequest, request writeRequest, ti
 	}
 }
 
+// pendingReceiptID is a placeholder written to the "receipt" header by
+// SendOpt.Receipt and SubscribeOpt.Receipt, which don't have access to the
+// Conn that will send the frame. createSendFrame and Conn.Subscribe replace
+// it with a real, connection-scoped ID once all options have run.
+const pendingReceiptID = "\x00pending-receipt-id\x00"
+
 func createSendFrame(conn *Conn, destination, contentType string, body []byte, opts []func(*frame.Frame) error) (*frame.Frame, error) {
 	// Set the content-length before the options, because this provides
 	// an opportunity to remove content-length.
 	f := frame.New(frame.SEND, frame.ContentLength, strconv.Itoa(len(body)))
 	f.Body = body
 	f.Header.Set(frame.Destination, destination)
-	f.Conn = conn
-	defer func() {
-		f.Conn = nil
-	}()
 	if contentType != "" {
 		f.Header.Set(frame.ContentType, contentType)
 	}
@@ -663,6 +665,10 @@ func createSendFrame(conn *Conn, destination, contentType string, body []byte, o
 		if err := opt(f); err != nil {
 			return nil, err
 		}
+	}
+
+	if id, ok := f.Header.Contains(frame.Receipt); ok && id == pendingReceiptID {
+		f.Header.Set(frame.Receipt, conn.AllocateID())
 	}
 
 	return f, nil
@@ -759,11 +765,6 @@ func (c *Conn) Subscribe(destination string, ack AckMode, opts ...func(*frame.Fr
 		frame.Destination, destination,
 		frame.Ack, ack.String())
 
-	subscribeFrame.Conn = c
-	defer func() {
-		subscribeFrame.Conn = nil
-	}()
-
 	for _, opt := range opts {
 		if opt == nil {
 			continue
@@ -773,6 +774,10 @@ func (c *Conn) Subscribe(destination string, ack AckMode, opts ...func(*frame.Fr
 			c.closeMutex.Unlock()
 			return nil, err
 		}
+	}
+
+	if id, ok := subscribeFrame.Header.Contains(frame.Receipt); ok && id == pendingReceiptID {
+		subscribeFrame.Header.Set(frame.Receipt, c.AllocateID())
 	}
 
 	replyTo, replyToSet := subscribeFrame.Header.Contains(ReplyToHeader)

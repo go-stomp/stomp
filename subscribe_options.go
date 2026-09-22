@@ -59,10 +59,9 @@ func init() {
 				return ErrInvalidCommand
 			}
 			if receiptId == "" {
-				if f.Conn == nil {
-					return ErrFrameHasNoConnection
-				}
-				receiptId = f.Conn.AllocateID()
+				// The connection isn't available here; Conn.Subscribe resolves
+				// this placeholder to a real, connection-scoped ID
+				receiptId = pendingReceiptID
 			}
 			f.Header.Set(frame.Receipt, receiptId)
 			return nil

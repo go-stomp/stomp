@@ -23,7 +23,6 @@ var (
 	ErrSubscribeReceiptTimeout       = newErrorMessage("subscribe receipt timeout")
 	ErrReceiptNotSupportedForReplyTo = newErrorMessage("receipt is not supported for reply-to subscriptions")
 	ErrNilOption                     = newErrorMessage("nil option")
-	ErrFrameHasNoConnection          = newErrorMessage("option requires a frame created by Conn.Send or Conn.Subscribe")
 )
 
 // StompError implements the Error interface, and provides
