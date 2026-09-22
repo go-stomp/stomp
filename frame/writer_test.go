@@ -31,6 +31,68 @@ func (s *WriterSuite) TestWrites(c *C) {
 	}
 }
 
+func (s *WriterSuite) TestConnectHeadersAreNotEscaped(c *C) {
+	tests := []struct {
+		frame    *Frame
+		expected string
+	}{
+		{
+			frame: New(CONNECT,
+				"login", `user\name`,
+				"passcode", `=x/xx-test:password:xx+xxx`,
+			),
+			expected: "CONNECT\n" +
+				"login:user\\name\n" +
+				"passcode:=x/xx-test:password:xx+xxx\n\n\x00",
+		},
+		{
+			frame:    New(CONNECTED, "server", `broker:1\main`),
+			expected: "CONNECTED\nserver:broker:1\\main\n\n\x00",
+		},
+	}
+
+	for _, test := range tests {
+		var buffer bytes.Buffer
+		err := NewWriter(&buffer).Write(test.frame)
+		c.Assert(err, IsNil)
+		c.Check(buffer.String(), Equals, test.expected)
+	}
+}
+
+func (s *WriterSuite) TestOtherFrameHeadersAreEscaped(c *C) {
+	for _, command := range []string{STOMP, SEND} {
+		var buffer bytes.Buffer
+		err := NewWriter(&buffer).Write(New(command, "key", `abc:def\ghi`))
+		c.Assert(err, IsNil)
+		c.Check(buffer.String(), Equals, command+"\nkey:abc\\cdef\\\\ghi\n\n\x00")
+	}
+}
+
+func (s *WriterSuite) TestInvalidUnescapedHeadersAreRejected(c *C) {
+	tests := []struct {
+		key   string
+		value string
+	}{
+		{key: "", value: "value"},
+		{key: "bad:key", value: "value"},
+		{key: "bad\rkey", value: "value"},
+		{key: "bad\nkey", value: "value"},
+		{key: "bad\x00key", value: "value"},
+		{key: "key", value: "bad\rvalue"},
+		{key: "key", value: "bad\nvalue"},
+		{key: "key", value: "bad\x00value"},
+	}
+
+	for _, command := range []string{CONNECT, CONNECTED} {
+		for _, test := range tests {
+			var buffer bytes.Buffer
+			err := NewWriter(&buffer).Write(New(command, test.key, test.value))
+			c.Check(err, Equals, ErrInvalidFrameFormat)
+			c.Check(buffer.String(), Equals, "")
+		}
+	}
+}
+
 func writeToBufferAndCheck(c *C, frameText string) {
 	reader := NewReader(strings.NewReader(frameText))
 
