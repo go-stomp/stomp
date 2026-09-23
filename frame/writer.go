@@ -3,6 +3,7 @@ package frame
 import (
 	"bufio"
 	"io"
+	"strings"
 )
 
 // slices used to write frames
@@ -27,6 +28,33 @@ func NewWriterSize(writer io.Writer, bufferSize int) *Writer {
 	return &Writer{writer: bufio.NewWriterSize(writer, bufferSize)}
 }
 
+func headersShouldBeEscaped(command string) bool {
+	// STOMP 1.2 excludes CONNECT and CONNECTED frames from header escaping.
+	return command != CONNECT && command != CONNECTED
+}
+
+func validateUnescapedHeaders(header *Header) error {
+	if header == nil {
+		return nil
+	}
+
+	for i := 0; i < header.Len(); i++ {
+		key, value := header.GetAt(i)
+		if key == "" || strings.ContainsAny(key, ":\r\n\x00") || strings.ContainsAny(value, "\r\n\x00") {
+			return ErrInvalidFrameFormat
+		}
+	}
+
+	return nil
+}
+
+func (w *Writer) writeHeaderString(value string, escape bool) (int, error) {
+	if escape {
+		return replacerForEncodeValue.WriteString(w.writer, value)
+	}
+	return w.writer.WriteString(value)
+}
+
 // Write the contents of a frame to the underlying io.Writer.
 func (w *Writer) Write(f *Frame) error {
 	var err error
@@ -38,6 +66,13 @@ func (w *Writer) Write(f *Frame) error {
 			return err
 		}
 	} else {
+		needEscapeHeaders := headersShouldBeEscaped(f.Command)
+		if !needEscapeHeaders {
+			if err = validateUnescapedHeaders(f.Header); err != nil {
+				return err
+			}
+		}
+
 		_, err = w.writer.Write([]byte(f.Command))
 		if err != nil {
 			return err
@@ -53,7 +88,7 @@ func (w *Writer) Write(f *Frame) error {
 			for i := 0; i < f.Header.Len(); i++ {
 				key, value := f.Header.GetAt(i)
 				//println("   ", key, ":", value)
-				_, err = replacerForEncodeValue.WriteString(w.writer, key)
+				_, err = w.writeHeaderString(key, needEscapeHeaders)
 				if err != nil {
 					return err
 				}
@@ -61,7 +96,7 @@ func (w *Writer) Write(f *Frame) error {
 				if err != nil {
 					return err
 				}
-				_, err = replacerForEncodeValue.WriteString(w.writer, value)
+				_, err = w.writeHeaderString(value, needEscapeHeaders)
 				if err != nil {
 					return err
 				}
