@@ -1,12 +1,13 @@
 package frame
 
 import (
+	"testing"
 	"time"
 
-	. "gopkg.in/check.v1"
+	"github.com/stretchr/testify/require"
 )
 
-func (s *FrameSuite) TestParseHeartBeat(c *C) {
+func TestFrameParseHeartBeat(t *testing.T) {
 	testCases := []struct {
 		Input             string
 		ExpectedDuration1 time.Duration
@@ -63,15 +64,15 @@ func (s *FrameSuite) TestParseHeartBeat(c *C) {
 
 	for _, tc := range testCases {
 		d1, d2, err := ParseHeartBeat(tc.Input)
-		c.Check(d1, Equals, tc.ExpectedDuration1)
-		c.Check(d2, Equals, tc.ExpectedDuration2)
+		require.Equal(t, tc.ExpectedDuration1, d1)
+		require.Equal(t, tc.ExpectedDuration2, d2)
 		if tc.ExpectError || tc.ExpectedError != nil {
-			c.Check(err, NotNil)
+			require.Error(t, err)
 			if tc.ExpectedError != nil {
-				c.Check(err, Equals, tc.ExpectedError)
+				require.ErrorIs(t, err, tc.ExpectedError)
 			}
 		} else {
-			c.Check(err, IsNil)
+			require.NoError(t, err)
 		}
 	}
 }

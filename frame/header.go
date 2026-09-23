@@ -49,7 +49,6 @@ const (
 //	accept-version:1.0,1.1,1.2
 //	comment:some comment
 //	comment:another comment
-//
 type Header struct {
 	slice []string
 }

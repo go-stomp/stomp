@@ -1,23 +1,25 @@
 package frame
 
 import (
-	. "gopkg.in/check.v1"
+	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
-func (s *FrameSuite) TestHeaderGetSetAddDel(c *C) {
+func TestHeaderGetSetAddDel(t *testing.T) {
 	h := &Header{}
-	c.Assert(h.Get("xxx"), Equals, "")
+	require.Equal(t, "", h.Get("xxx"))
 	h.Add("xxx", "yyy")
-	c.Assert(h.Get("xxx"), Equals, "yyy")
+	require.Equal(t, "yyy", h.Get("xxx"))
 	h.Add("xxx", "zzz")
-	c.Assert(h.GetAll("xxx"), DeepEquals, []string{"yyy", "zzz"})
+	require.Equal(t, []string{"yyy", "zzz"}, h.GetAll("xxx"))
 	h.Set("xxx", "111")
-	c.Assert(h.Get("xxx"), Equals, "111")
+	require.Equal(t, h.Get("xxx"), "111")
 	h.Del("xxx")
-	c.Assert(h.Get("xxx"), Equals, "")
+	require.Equal(t, "", h.Get("xxx"))
 }
 
-func (s *FrameSuite) TestHeaderClone(c *C) {
+func TestHeaderClone(t *testing.T) {
 	h := Header{}
 	h.Set("xxx", "yyy")
 	h.Set("yyy", "zzz")
@@ -25,42 +27,42 @@ func (s *FrameSuite) TestHeaderClone(c *C) {
 	hc := h.Clone()
 	h.Del("xxx")
 	h.Del("yyy")
-	c.Assert(hc.Get("xxx"), Equals, "yyy")
-	c.Assert(hc.Get("yyy"), Equals, "zzz")
+	require.Equal(t, "yyy", hc.Get("xxx"))
+	require.Equal(t, "zzz", hc.Get("yyy"))
 }
 
-func (s *FrameSuite) TestHeaderContains(c *C) {
+func TestHeaderContains(t *testing.T) {
 	h := NewHeader("xxx", "yyy", "zzz", "aaa", "xxx", "ccc")
 	v, ok := h.Contains("xxx")
-	c.Assert(v, Equals, "yyy")
-	c.Assert(ok, Equals, true)
+	require.Equal(t, "yyy", v)
+	require.True(t, ok)
 
 	v, ok = h.Contains("123")
-	c.Assert(v, Equals, "")
-	c.Assert(ok, Equals, false)
+	require.Equal(t, v, "")
+	require.False(t, ok)
 }
 
-func (s *FrameSuite) TestContentLength(c *C) {
+func TestHeaderContentLength(t *testing.T) {
 	h := NewHeader("xxx", "yy", "content-length", "202", "zz", "123")
 	cl, ok, err := h.ContentLength()
-	c.Assert(cl, Equals, 202)
-	c.Assert(ok, Equals, true)
-	c.Assert(err, Equals, nil)
+	require.Equal(t, 202, cl)
+	require.True(t, ok)
+	require.NoError(t, err)
 
 	h.Set("content-length", "twenty")
 	cl, ok, err = h.ContentLength()
-	c.Assert(cl, Equals, 0)
-	c.Assert(ok, Equals, true)
-	c.Assert(err, NotNil)
+	require.Equal(t, 0, cl)
+	require.True(t, ok)
+	require.Error(t, err)
 
 	h.Del("content-length")
 	cl, ok, err = h.ContentLength()
-	c.Assert(cl, Equals, 0)
-	c.Assert(ok, Equals, false)
-	c.Assert(err, IsNil)
+	require.Equal(t, 0, cl)
+	require.False(t, ok)
+	require.NoError(t, err)
 }
 
-func (s *FrameSuite) TestLit(c *C) {
+func TestHeaderLit(t *testing.T) {
 	_ = Frame{
 		Command: "CONNECT",
 		Header:  NewHeader("login", "xxx", "passcode", "yyy"),

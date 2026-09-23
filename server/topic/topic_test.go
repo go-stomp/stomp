@@ -1,15 +1,13 @@
 package topic
 
 import (
+	"testing"
+
 	"github.com/go-stomp/stomp/v3/frame"
-	. "gopkg.in/check.v1"
+	"github.com/stretchr/testify/require"
 )
 
-type TopicSuite struct{}
-
-var _ = Suite(&TopicSuite{})
-
-func (s *TopicSuite) TestTopicWithoutSubscription(c *C) {
+func TestTopicWithoutSubscription(t *testing.T) {
 	topic := newTopic("destination")
 
 	f := frame.New(frame.MESSAGE,
@@ -18,7 +16,7 @@ func (s *TopicSuite) TestTopicWithoutSubscription(c *C) {
 	topic.Enqueue(f)
 }
 
-func (s *TopicSuite) TestTopicWithOneSubscription(c *C) {
+func TestTopicWithOneSubscription(t *testing.T) {
 	sub := &fakeSubscription{}
 
 	topic := newTopic("destination")
@@ -29,11 +27,11 @@ func (s *TopicSuite) TestTopicWithOneSubscription(c *C) {
 
 	topic.Enqueue(f)
 
-	c.Assert(len(sub.Frames), Equals, 1)
-	c.Assert(sub.Frames[0], Equals, f)
+	require.Len(t, sub.Frames, 1)
+	require.Equal(t, f, sub.Frames[0])
 }
 
-func (s *TopicSuite) TestTopicWithTwoSubscriptions(c *C) {
+func TestTopicWithTwoSubscriptions(t *testing.T) {
 	sub1 := &fakeSubscription{}
 	sub2 := &fakeSubscription{}
 
@@ -47,10 +45,10 @@ func (s *TopicSuite) TestTopicWithTwoSubscriptions(c *C) {
 
 	topic.Enqueue(f)
 
-	c.Assert(len(sub1.Frames), Equals, 1)
-	c.Assert(len(sub2.Frames), Equals, 1)
-	c.Assert(sub1.Frames[0], Not(Equals), f)
-	c.Assert(sub2.Frames[0], Equals, f)
+	require.Len(t, sub1.Frames, 1)
+	require.Len(t, sub2.Frames, 1)
+	require.NotSame(t, f, sub1.Frames[0])
+	require.Equal(t, f, sub2.Frames[0])
 }
 
 type fakeSubscription struct {
