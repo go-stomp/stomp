@@ -1,23 +1,21 @@
 package client
 
 import (
-	. "gopkg.in/check.v1"
 	"math"
+	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
-type UtilSuite struct{}
-
-var _ = Suite(&UtilSuite{})
-
-func (s *UtilSuite) TestAsMilliseconds(c *C) {
+func TestUtilAsMilliseconds(t *testing.T) {
 	d := time.Duration(30) * time.Millisecond
-	c.Check(asMilliseconds(d, math.MaxInt32), Equals, 30)
+	require.Equal(t, 30, asMilliseconds(d, math.MaxInt32))
 
 	// approximately one year
 	d = time.Duration(365) * time.Duration(24) * time.Hour
-	c.Check(asMilliseconds(d, math.MaxInt32), Equals, math.MaxInt32)
+	require.Equal(t, math.MaxInt32, asMilliseconds(d, math.MaxInt32))
 
 	d = time.Duration(365) * time.Duration(24) * time.Hour
-	c.Check(asMilliseconds(d, maxHeartBeat), Equals, maxHeartBeat)
+	require.Equal(t, maxHeartBeat, asMilliseconds(d, maxHeartBeat))
 }

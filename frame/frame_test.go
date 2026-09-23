@@ -3,65 +3,57 @@ package frame
 import (
 	"testing"
 
-	. "gopkg.in/check.v1"
+	"github.com/stretchr/testify/require"
 )
 
-func TestFrame(t *testing.T) {
-	TestingT(t)
-}
-
-type FrameSuite struct{}
-
-var _ = Suite(&FrameSuite{})
-
-func (s *FrameSuite) TestNew(c *C) {
+func TestFrameNew(t *testing.T) {
 	f := New("CCC")
-	c.Check(f.Header.Len(), Equals, 0)
-	c.Check(f.Command, Equals, "CCC")
+	require.Equal(t, 0, f.Header.Len())
+	require.Equal(t, "CCC", f.Command)
 
 	f = New("DDDD", "abc", "def")
-	c.Check(f.Header.Len(), Equals, 1)
+	require.Equal(t, 1, f.Header.Len())
 	k, v := f.Header.GetAt(0)
-	c.Check(k, Equals, "abc")
-	c.Check(v, Equals, "def")
-	c.Check(f.Command, Equals, "DDDD")
+	require.Equal(t, "abc", k)
+	require.Equal(t, "def", v)
+	require.Equal(t, "DDDD", f.Command)
 
 	f = New("EEEEEEE", "abc", "def", "hij", "klm")
-	c.Check(f.Command, Equals, "EEEEEEE")
-	c.Check(f.Header.Len(), Equals, 2)
+	require.Equal(t, "EEEEEEE", f.Command)
+	require.Equal(t, 2, f.Header.Len())
 	k, v = f.Header.GetAt(0)
-	c.Check(k, Equals, "abc")
-	c.Check(v, Equals, "def")
+	require.Equal(t, "abc", k)
+	require.Equal(t, "def", v)
 	k, v = f.Header.GetAt(1)
-	c.Check(k, Equals, "hij")
-	c.Check(v, Equals, "klm")
+	require.Equal(t, "hij", k)
+	require.Equal(t, "klm", v)
 }
 
-func (s *FrameSuite) TestClone(c *C) {
+func TestFrameClone(t *testing.T) {
 	f1 := &Frame{
 		Command: "AAAA",
 	}
 
 	f2 := f1.Clone()
-	c.Check(f2.Command, Equals, f1.Command)
-	c.Check(f2.Header, IsNil)
-	c.Check(f2.Body, IsNil)
+	require.Equal(t, f1.Command, f2.Command)
+	require.Nil(t, f2.Header)
+	require.Nil(t, f2.Body)
 
 	f1.Header = NewHeader("aaa", "1", "bbb", "2", "ccc", "3")
 
 	f2 = f1.Clone()
-	c.Check(f2.Header.Len(), Equals, f1.Header.Len())
+	require.Equal(t, f2.Header.Len(), f2.Header.Len())
 	for i := 0; i < f1.Header.Len(); i++ {
 		k1, v1 := f1.Header.GetAt(i)
 		k2, v2 := f2.Header.GetAt(i)
-		c.Check(k1, Equals, k2)
-		c.Check(v1, Equals, v2)
+		require.Equal(t, k1, k2)
+		require.Equal(t, v1, v2)
 	}
 
 	f1.Body = []byte{1, 2, 3, 4, 5, 6, 5, 4, 77, 88, 99, 0xaa, 0xbb, 0xcc, 0xff}
 	f2 = f1.Clone()
-	c.Check(len(f2.Body), Equals, len(f1.Body))
+	require.Len(t, f2.Body, len(f1.Body))
 	for i := 0; i < len(f1.Body); i++ {
-		c.Check(f1.Body[i], Equals, f2.Body[i])
+		require.Equal(t, f1.Body[i], f2.Body[i])
 	}
 }

@@ -1,21 +1,19 @@
 package queue
 
 import (
-	. "gopkg.in/check.v1"
+	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
-type ManagerSuite struct{}
-
-var _ = Suite(&ManagerSuite{})
-
-func (s *ManagerSuite) TestManager(c *C) {
+func TestManager(t *testing.T) {
 	mgr := NewManager(NewMemoryQueueStorage())
 
 	q1 := mgr.Find("/queue/1")
-	c.Assert(q1, NotNil)
+	require.NotNil(t, q1)
 
 	q2 := mgr.Find("/queue/2")
-	c.Assert(q2, NotNil)
+	require.NotNil(t, q2)
 
-	c.Assert(mgr.Find("/queue/1"), Equals, q1)
+	require.Equal(t, q1, mgr.Find("/queue/1"))
 }

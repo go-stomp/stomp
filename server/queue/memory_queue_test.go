@@ -1,15 +1,13 @@
 package queue
 
 import (
+	"testing"
+
 	"github.com/go-stomp/stomp/v3/frame"
-	. "gopkg.in/check.v1"
+	"github.com/stretchr/testify/require"
 )
 
-type MemoryQueueSuite struct{}
-
-var _ = Suite(&MemoryQueueSuite{})
-
-func (s *MemoryQueueSuite) Test1(c *C) {
+func TestMemoryQueue(t *testing.T) {
 	mq := NewMemoryQueueStorage()
 	mq.Start()
 
@@ -19,7 +17,7 @@ func (s *MemoryQueueSuite) Test1(c *C) {
 		frame.Subscription, "1")
 
 	err := mq.Enqueue("/queue/test", f1)
-	c.Assert(err, IsNil)
+	require.NoError(t, err)
 
 	f2 := frame.New(frame.MESSAGE,
 		frame.Destination, "/queue/test",
@@ -27,7 +25,7 @@ func (s *MemoryQueueSuite) Test1(c *C) {
 		frame.Subscription, "1")
 
 	err = mq.Enqueue("/queue/test", f2)
-	c.Assert(err, IsNil)
+	require.NoError(t, err)
 
 	f3 := frame.New(frame.MESSAGE,
 		frame.Destination, "/queue/test2",
@@ -35,30 +33,30 @@ func (s *MemoryQueueSuite) Test1(c *C) {
 		frame.Subscription, "2")
 
 	err = mq.Enqueue("/queue/test2", f3)
-	c.Assert(err, IsNil)
+	require.NoError(t, err)
 
 	// attempt to dequeue from a different queue
 	f, err := mq.Dequeue("/queue/other-queue")
-	c.Check(err, IsNil)
-	c.Assert(f, IsNil)
+	require.NoError(t, err)
+	require.Nil(t, f)
 
 	f, err = mq.Dequeue("/queue/test2")
-	c.Check(err, IsNil)
-	c.Assert(f, Equals, f3)
+	require.NoError(t, err)
+	require.Equal(t, f3, f)
 
 	f, err = mq.Dequeue("/queue/test")
-	c.Check(err, IsNil)
-	c.Assert(f, Equals, f1)
+	require.NoError(t, err)
+	require.Equal(t, f1, f)
 
 	f, err = mq.Dequeue("/queue/test")
-	c.Check(err, IsNil)
-	c.Assert(f, Equals, f2)
+	require.NoError(t, err)
+	require.Equal(t, f2, f)
 
 	f, err = mq.Dequeue("/queue/test")
-	c.Check(err, IsNil)
-	c.Assert(f, IsNil)
+	require.NoError(t, err)
+	require.Nil(t, f)
 
 	f, err = mq.Dequeue("/queue/test2")
-	c.Check(err, IsNil)
-	c.Assert(f, IsNil)
+	require.NoError(t, err)
+	require.Nil(t, f)
 }
