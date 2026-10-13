@@ -904,7 +904,7 @@ func (c *Conn) createAckNackFrame(msg *Message, ack bool) (*frame.Frame, error) 
 		return nil, ErrNackNotSupported
 	}
 
-	if msg.Header == nil || msg.Subscription == nil || msg.Conn == nil {
+	if msg == nil || msg.Header == nil || msg.Subscription == nil || msg.Conn == nil {
 		return nil, ErrNotReceivedMessage
 	}
 
