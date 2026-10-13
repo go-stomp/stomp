@@ -225,8 +225,16 @@ func ConnectWithContext(ctx context.Context, conn io.ReadWriteCloser, opts ...fu
 			}
 		}
 
-		if readTimeout < options.ReadTimeout {
+		// A direction is enabled only when both peers advertise a nonzero interval.
+		if readTimeout == 0 || options.ReadTimeout == 0 {
+			readTimeout = 0
+		} else if readTimeout < options.ReadTimeout {
 			readTimeout = options.ReadTimeout
+		}
+		if writeTimeout == 0 || options.WriteTimeout == 0 {
+			writeTimeout = 0
+		} else if writeTimeout < options.WriteTimeout {
+			writeTimeout = options.WriteTimeout
 		}
 
 		c.readTimeout = readTimeout
