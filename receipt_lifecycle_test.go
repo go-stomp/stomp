@@ -112,3 +112,42 @@ func TestDeliveredResponseWinsOverClose(t *testing.T) {
 	}
 	require.ErrorIs(t, readReceiptWithTimeout(make(chan *frame.Frame, 1), 0, ErrMsgReceiptTimeout, closed), ErrClosedUnexpectedly)
 }
+
+func TestUnsubscribeCompletesCallerReceiptAndSubscription(t *testing.T) {
+	for _, sameID := range []bool{false, true} {
+		name := "different IDs"
+		if sameID {
+			name = "same ID"
+		}
+		t.Run(name, func(t *testing.T) {
+			c, _, reader, writer := receiptTestConn(t, ConnOpt.UnsubscribeReceiptTimeout(0))
+			sub, err := c.Subscribe("/queue/a", AckAuto)
+			require.NoError(t, err)
+			_, err = reader.Read()
+			require.NoError(t, err)
+			receipt := "unsubscribe-receipt"
+			if sameID {
+				receipt = sub.Id()
+			}
+			done := make(chan error, 1)
+			go func() { done <- sub.Unsubscribe(SubscribeOpt.Header(frame.Receipt, receipt)) }()
+			f, err := reader.Read()
+			require.NoError(t, err)
+			require.Equal(t, receipt, f.Header.Get(frame.Receipt))
+			require.NoError(t, writer.Write(frame.New(frame.RECEIPT, frame.ReceiptId, receipt)))
+			select {
+			case err := <-done:
+				require.NoError(t, err)
+			case <-time.After(time.Second):
+				t.Fatal("unsubscribe did not finish after its receipt")
+			}
+			_, open := <-sub.C
+			require.False(t, open)
+			require.False(t, sub.Active())
+			require.NoError(t, c.Send("/queue/b", "", nil))
+			f, err = reader.Read()
+			require.NoError(t, err)
+			require.Equal(t, "/queue/b", f.Header.Get(frame.Destination))
+		})
+	}
+}

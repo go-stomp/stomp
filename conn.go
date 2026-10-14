@@ -331,7 +331,7 @@ func readLoop(c *Conn, reader *frame.Reader) {
 func processLoop(c *Conn, writer *frame.Writer) {
 	channels := make(map[string]chan *frame.Frame)
 	receipts := make(map[string]writeRequest)
-	unsubscribing := make(map[string]chan *frame.Frame)
+	unsubscribing := make(map[string]string)
 
 	var readTimeoutChannel <-chan time.Time
 	var readTimer *time.Timer
@@ -411,11 +411,14 @@ func processLoop(c *Conn, writer *frame.Writer) {
 						req.C <- f
 						close(req.C)
 						delete(receipts, id)
-					} else if ch, ok := unsubscribing[id]; ok {
-						ch <- f
-						delete(channels, id)
+					}
+					if subID, ok := unsubscribing[id]; ok {
 						delete(unsubscribing, id)
-						close(ch)
+						if ch, ok := channels[subID]; ok {
+							ch <- f
+							delete(channels, subID)
+							close(ch)
+						}
 					}
 				} else {
 					err := &Error{Message: "missing receipt-id", Frame: f}
@@ -501,13 +504,12 @@ func processLoop(c *Conn, writer *frame.Writer) {
 					sendFrame = false
 				} else {
 					id, _ := req.Frame.Header.Contains(frame.Id)
-					// is this trying to be too clever -- add a receipt
-					// header so that when the server responds with a
-					// RECEIPT frame, the corresponding channel will be closed
-					req.Frame.Header.Set(frame.Receipt, id)
-					if ch, ok := channels[id]; ok {
-						unsubscribing[id] = ch
+					receipt, ok := req.Frame.Header.Contains(frame.Receipt)
+					if !ok {
+						receipt = id
+						req.Frame.Header.Set(frame.Receipt, receipt)
 					}
+					unsubscribing[receipt] = id
 				}
 			}
 
