@@ -469,10 +469,11 @@ func TestSubscribeAbandonDoesNotWedgeConnection(t *testing.T) {
 			defer close(messagesWritten)
 			// Exceed Subscription.C's capacity (16) to exercise abandon's drain.
 			for i := 0; i < 25; i++ {
-				if err := writer.Write(frame.New(frame.MESSAGE,
+                                err := writer.Write(frame.New(frame.MESSAGE,
 					frame.Subscription, id,
 					frame.Destination, "/queue/test-1",
-					frame.MessageId, fmt.Sprintf("message-%d", i))); err != nil {
+					frame.MessageId, fmt.Sprintf("message-%d", i)))
+				if err != nil {
 					messagesWritten <- err
 					return
 				}
