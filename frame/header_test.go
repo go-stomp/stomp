@@ -1,6 +1,7 @@
 package frame
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -67,5 +68,17 @@ func TestHeaderLit(t *testing.T) {
 		Command: "CONNECT",
 		Header:  NewHeader("login", "xxx", "passcode", "yyy"),
 		Body:    []byte{1, 2, 3, 4},
+	}
+}
+
+func TestHeaderContentLengthIntRange(t *testing.T) {
+	length, present, err := NewHeader(ContentLength, "4294967295").ContentLength()
+	require.True(t, present)
+	if strconv.IntSize == 32 {
+		require.ErrorIs(t, err, strconv.ErrRange)
+		require.Zero(t, length)
+	} else {
+		require.NoError(t, err)
+		require.Equal(t, uint64(4294967295), uint64(length))
 	}
 }

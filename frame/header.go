@@ -168,6 +168,9 @@ func (h *Header) ContentLength() (value int, ok bool, err error) {
 		return 0, true, err
 	}
 
+	if n > uint64(^uint(0)>>1) {
+		return 0, true, strconv.ErrRange
+	}
 	value = int(n)
 	ok = true
 	return value, ok, nil

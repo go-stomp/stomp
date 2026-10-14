@@ -1,7 +1,10 @@
 package frame
 
 import (
+	"bytes"
 	"io"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/iotest"
@@ -125,6 +128,30 @@ func TestReaderSendWithContentLength(t *testing.T) {
 	frame, err = reader.Read()
 	require.Nil(t, frame)
 	require.ErrorIs(t, err, io.EOF)
+}
+
+func TestReaderLargeContentLengthBody(t *testing.T) {
+	body := bytes.Repeat([]byte{0x00, 0x01, 0x02}, bodyChunkSize+123)
+	wire := "SEND\ncontent-length:" + strconv.Itoa(len(body)) + "\n\n" + string(body) + "\x00"
+	// one byte per read so the body buffer has to grow many times
+	reader := NewReader(iotest.OneByteReader(strings.NewReader(wire)))
+
+	frame, err := reader.Read()
+	require.NoError(t, err)
+	require.Equal(t, body, frame.Body)
+}
+
+func TestReaderContentLengthIsNotPreallocated(t *testing.T) {
+	reader := NewReader(strings.NewReader("SEND\ncontent-length:2147483647\n\nx"))
+
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	frame, err := reader.Read()
+	runtime.ReadMemStats(&after)
+
+	require.Nil(t, frame)
+	require.ErrorIs(t, err, io.EOF)
+	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(1<<20))
 }
 
 func TestReaderInvalidCommand(t *testing.T) {
