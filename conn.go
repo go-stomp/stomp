@@ -98,7 +98,12 @@ func DialWithContext(ctx context.Context, network, addr string, opts ...func(*Co
 	// so that if host has been explicitly specified it will override.
 	opts = append([]func(*Conn) error{ConnOpt.Host(host)}, opts...)
 
-	return ConnectWithContext(ctx, c, opts...)
+	conn, err := ConnectWithContext(ctx, c, opts...)
+	if err != nil {
+		_ = c.Close()
+		return nil, err
+	}
+	return conn, nil
 }
 
 // Connect creates a STOMP connection and performs the STOMP connect

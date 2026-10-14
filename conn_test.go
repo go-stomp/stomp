@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"sync"
 	"testing"
 	"time"
@@ -60,6 +61,35 @@ func TestStompConnOptionSetLogger(t *testing.T) {
 	require.NotNil(t, conn)
 
 	require.Equal(t, mockLogger, conn.log)
+}
+
+func TestDialClosesConnectionOnInvalidHeaders(t *testing.T) {
+	listener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = listener.Close() })
+	require.NoError(t, listener.SetDeadline(time.Now().Add(5*time.Second)))
+
+	conn, err := Dial("tcp", listener.Addr().String(),
+		ConnOpt.Login("user", "bad\npass"),
+		func(c *Conn) error {
+			// Keep the socket alive so garbage collection cannot mask missing cleanup.
+			socket := c.conn
+			t.Cleanup(func() { _ = socket.Close() })
+			return nil
+		},
+	)
+	require.ErrorIs(t, err, frame.ErrInvalidFrameFormat)
+	require.Nil(t, conn)
+
+	peer, err := listener.Accept()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = peer.Close() })
+	require.NoError(t, peer.SetReadDeadline(time.Now().Add(time.Second)))
+
+	var data [1]byte
+	n, err := peer.Read(data[:])
+	require.Zero(t, n)
+	require.ErrorIs(t, err, io.EOF)
 }
 
 func TestStompUnsuccessfulConnect(t *testing.T) {
