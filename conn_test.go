@@ -433,6 +433,12 @@ func TestSubscribeReceiptTimeout(t *testing.T) {
 func TestSubscribeAbandonDoesNotWedgeConnection(t *testing.T) {
 	fc1, fc2 := testutil.NewFakeConn(t)
 	stop := make(chan struct{})
+	unsubscribed := make(chan struct{})
+	t.Cleanup(func() {
+		_ = fc1.Close()
+		_ = fc2.Close()
+		<-stop
+	})
 
 	go func() {
 		defer func() {
@@ -456,15 +462,27 @@ func TestSubscribeAbandonDoesNotWedgeConnection(t *testing.T) {
 		id, ok := f2.Header.Contains(frame.Id)
 		require.True(t, ok)
 
-		// flood more messages than Subscription.C can buffer (16), so that
-		// without draining, readLoop would block delivering one of them
-		for i := 0; i < 25; i++ {
-			err = writer.Write(frame.New(frame.MESSAGE,
-				frame.Subscription, id,
-				frame.Destination, "/queue/test-1",
-				frame.MessageId, fmt.Sprintf("message-%d", i)))
-			require.NoError(t, err)
-		}
+		// Read concurrently with the flood: an early timeout can make the
+		// client write UNSUBSCRIBE before it has drained all the messages.
+		messagesWritten := make(chan error, 1)
+		go func() {
+			defer close(messagesWritten)
+			// Exceed Subscription.C's capacity (16) to exercise abandon's drain.
+			for i := 0; i < 25; i++ {
+                                err := writer.Write(frame.New(frame.MESSAGE,
+					frame.Subscription, id,
+					frame.Destination, "/queue/test-1",
+					frame.MessageId, fmt.Sprintf("message-%d", i)))
+				if err != nil {
+					messagesWritten <- err
+					return
+				}
+			}
+		}()
+		defer func() {
+			_ = fc2.Close()
+			<-messagesWritten
+		}()
 
 		// the abandoning UNSUBSCRIBE must still reach the wire even though
 		// processLoop had messages queued up for the abandoned subscription
@@ -472,8 +490,11 @@ func TestSubscribeAbandonDoesNotWedgeConnection(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "UNSUBSCRIBE", f3.Command)
 		require.Equal(t, id, f3.Header.Get(frame.Id))
+		require.NoError(t, <-messagesWritten)
 		err = writer.Write(frame.New(frame.RECEIPT, frame.ReceiptId, f3.Header.Get(frame.Receipt)))
 		require.NoError(t, err)
+
+		close(unsubscribed)
 
 		// the connection must still be usable afterwards
 		f4, err := reader.Read()
@@ -490,6 +511,12 @@ func TestSubscribeAbandonDoesNotWedgeConnection(t *testing.T) {
 	sub, err := client.Subscribe("/queue/test-1", AckAuto, SubscribeOpt.Receipt(""))
 	require.ErrorIs(t, err, ErrSubscribeReceiptTimeout)
 	require.Nil(t, sub)
+
+	select {
+	case <-unsubscribed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("connection wedged: abandoned subscription's messages blocked processLoop")
+	}
 
 	err = client.Disconnect()
 	require.NoError(t, err)
