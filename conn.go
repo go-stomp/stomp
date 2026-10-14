@@ -135,7 +135,7 @@ func ConnectWithContext(ctx context.Context, conn io.ReadWriteCloser, opts ...fu
 	}
 
 	if options.WriteBufferSize > 0 {
-		writer = frame.NewWriterSize(conn, options.ReadBufferSize)
+		writer = frame.NewWriterSize(conn, options.WriteBufferSize)
 	}
 
 	readChannelCapacity := 20
