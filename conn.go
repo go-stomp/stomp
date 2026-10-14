@@ -46,6 +46,7 @@ type Conn struct {
 	writeCh                   chan writeRequest
 	doneCh                    chan struct{}
 	receiptWakeCh             chan struct{}
+	processLoopDone           chan struct{}
 	version                   Version
 	session                   string
 	server                    string
@@ -167,6 +168,7 @@ func ConnectWithContext(ctx context.Context, conn io.ReadWriteCloser, opts ...fu
 	c.writeCh = make(chan writeRequest, writeChannelCapacity)
 	c.receiptWakeCh = make(chan struct{}, 1)
 	c.doneCh = make(chan struct{})
+	c.processLoopDone = make(chan struct{})
 
 	if options.Host == "" {
 		// host not specified yet, attempt to get from net.Conn if possible
@@ -350,6 +352,11 @@ func processLoop(c *Conn, writer *frame.Writer) {
 			close(req.C)
 		}
 	}()
+
+	// Runs before MustDisconnect: callers blocked on writeCh while holding
+	// closeMutex must be released before the mutex can be taken here.
+	exited := sync.OnceFunc(func() { close(c.processLoopDone) })
+	defer exited()
 
 	for {
 		if c.readTimeout > 0 && readTimer == nil {
@@ -560,12 +567,15 @@ func (c *Conn) Disconnect() error {
 		C:     ch,
 	}
 
-	err := sendDataToWriteChWithTimeout(c.writeCh, request, c.msgSendTimeout)
+	err := sendDataToWriteChWithTimeout(c.writeCh, request, c.msgSendTimeout, c.processLoopDone)
+	c.closeMutex.Unlock()
+	if errors.Is(err, ErrClosedUnexpectedly) {
+		// processLoop has exited and its deferred MustDisconnect closes the connection
+		return nil
+	}
 	if err != nil {
-		c.closeMutex.Unlock()
 		return err
 	}
-	c.closeMutex.Unlock()
 
 	err = readReceiptWithTimeout(ch, c.disconnectReceiptTimeout, ErrDisconnectReceiptTimeout, c.doneCh)
 
@@ -641,7 +651,7 @@ func (c *Conn) Send(destination, contentType string, body []byte, opts ...func(*
 			Done:  done,
 		}
 
-		err := sendDataToWriteChWithTimeout(c.writeCh, request, c.msgSendTimeout)
+		err := sendDataToWriteChWithTimeout(c.writeCh, request, c.msgSendTimeout, c.processLoopDone)
 		c.closeMutex.Unlock()
 		if err != nil {
 			return err
@@ -655,7 +665,7 @@ func (c *Conn) Send(destination, contentType string, body []byte, opts ...func(*
 		// no receipt required
 		request := writeRequest{Frame: f}
 
-		err := sendDataToWriteChWithTimeout(c.writeCh, request, c.msgSendTimeout)
+		err := sendDataToWriteChWithTimeout(c.writeCh, request, c.msgSendTimeout, c.processLoopDone)
 		c.closeMutex.Unlock()
 		if err != nil {
 			return err
@@ -698,18 +708,27 @@ func receiptResult(response *frame.Frame, ok bool) error {
 	return nil
 }
 
-func sendDataToWriteChWithTimeout(ch chan writeRequest, request writeRequest, timeout time.Duration) error {
-	if timeout <= 0 {
-		ch <- request
-		return nil
+func sendDataToWriteChWithTimeout(ch chan writeRequest, request writeRequest, timeout time.Duration, done <-chan struct{}) error {
+	// Once processLoop has exited nothing will ever consume the request.
+	select {
+	case <-done:
+		return ErrClosedUnexpectedly
+	default:
 	}
 
-	timer := time.NewTimer(timeout)
+	var timeoutCh <-chan time.Time
+	if timeout > 0 {
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
+		timeoutCh = timer.C
+	}
+
 	select {
-	case <-timer.C:
+	case <-done:
+		return ErrClosedUnexpectedly
+	case <-timeoutCh:
 		return ErrMsgSendTimeout
 	case ch <- request:
-		timer.Stop()
 		return nil
 	}
 }
@@ -774,7 +793,7 @@ func (c *Conn) sendFrame(f *frame.Frame) error {
 			Done:  done,
 		}
 
-		err := sendDataToWriteChWithTimeout(c.writeCh, request, c.msgSendTimeout)
+		err := sendDataToWriteChWithTimeout(c.writeCh, request, c.msgSendTimeout, c.processLoopDone)
 		if err != nil {
 			c.closeMutex.Unlock()
 			return err
@@ -788,7 +807,7 @@ func (c *Conn) sendFrame(f *frame.Frame) error {
 	} else {
 		// no receipt required
 		request := writeRequest{Frame: f}
-		err := sendDataToWriteChWithTimeout(c.writeCh, request, c.msgSendTimeout)
+		err := sendDataToWriteChWithTimeout(c.writeCh, request, c.msgSendTimeout, c.processLoopDone)
 		if err != nil {
 			c.closeMutex.Unlock()
 			return err
@@ -892,7 +911,7 @@ func (c *Conn) Subscribe(destination string, ack AckMode, opts ...func(*frame.Fr
 	}
 
 	// TODO is this safe? There is no check if writeCh is actually open.
-	err := sendDataToWriteChWithTimeout(c.writeCh, request, c.msgSendTimeout)
+	err := sendDataToWriteChWithTimeout(c.writeCh, request, c.msgSendTimeout, c.processLoopDone)
 	if err != nil {
 		c.closeMutex.Unlock()
 		// Request never reached processLoop; readLoop would otherwise block on ch forever.

@@ -1120,3 +1120,42 @@ func TestStompConnectWithContext(t *testing.T) {
 	// and the connection waited longer than the 5 seconds we set
 	require.Error(t, err)
 }
+
+func TestSendDoesNotDeadlockWhenProcessLoopExits(t *testing.T) {
+	fc1, fc2 := testutil.NewFakeConn(t)
+	defer func() { _ = fc1.Close() }()
+
+	go func() {
+		reader := frame.NewReader(fc2)
+		writer := frame.NewWriter(fc2)
+		f, err := reader.Read()
+		require.NoError(t, err)
+		require.Equal(t, frame.CONNECT, f.Command)
+		require.NoError(t, writer.Write(frame.New(frame.CONNECTED)))
+		// stop reading so that processLoop blocks writing and writeCh fills up
+	}()
+
+	client, err := Connect(fc1, ConnOpt.WriteChannelCapacity(1), ConnOpt.MsgSendTimeout(0))
+	require.NoError(t, err)
+
+	sendErr := make(chan error, 1)
+	go func() {
+		for {
+			if err := client.Send("/queue/test", "text/plain", []byte("hello")); err != nil {
+				sendErr <- err
+				return
+			}
+		}
+	}()
+
+	// let a Send block on the full writeCh while holding closeMutex
+	time.Sleep(100 * time.Millisecond)
+	_ = fc2.Close()
+
+	select {
+	case err := <-sendErr:
+		require.ErrorIs(t, err, ErrClosedUnexpectedly)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Send blocked after processLoop exited")
+	}
+}
