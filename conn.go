@@ -684,6 +684,9 @@ func createSendFrame(conn *Conn, destination, contentType string, body []byte, o
 		f.Header.Set(frame.Receipt, conn.AllocateID())
 	}
 
+	if err := f.ValidateBody(); err != nil {
+		return nil, err
+	}
 	return f, nil
 }
 
