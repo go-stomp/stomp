@@ -85,8 +85,10 @@ func Dial(network, addr string, opts ...func(*Conn) error) (*Conn, error) {
 	return DialWithContext(context.Background(), network, addr, opts...)
 }
 
+// DialWithContext dials and performs the STOMP handshake within ctx.
+// Cancellation after the handshake does not close the connection.
 func DialWithContext(ctx context.Context, network, addr string, opts ...func(*Conn) error) (*Conn, error) {
-	c, err := net.Dial(network, addr)
+	c, err := (&net.Dialer{}).DialContext(ctx, network, addr)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +119,13 @@ func Connect(conn io.ReadWriteCloser, opts ...func(*Conn) error) (*Conn, error) 
 	return ConnectWithContext(context.Background(), conn, opts...)
 }
 
+// ConnectWithContext performs the STOMP handshake within ctx. Cancellation
+// during the handshake closes conn to interrupt pending reads and writes.
+// Cancellation after the handshake does not close the connection.
 func ConnectWithContext(ctx context.Context, conn io.ReadWriteCloser, opts ...func(*Conn) error) (*Conn, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	reader := frame.NewReader(conn)
 	writer := frame.NewWriter(conn)
 
@@ -178,29 +186,11 @@ func ConnectWithContext(ctx context.Context, conn io.ReadWriteCloser, opts ...fu
 		return nil, err
 	}
 
-	err = writer.Write(connectFrame)
+	response, err := exchangeHandshake(ctx, conn, reader, writer, connectFrame)
 	if err != nil {
 		return nil, err
 	}
 
-	connection, isNetConn := conn.(net.Conn)
-	deadline, ok := ctx.Deadline()
-	if ok && isNetConn {
-		if err := connection.SetReadDeadline(deadline); err != nil {
-			return nil, err
-		}
-	}
-
-	response, err := reader.Read()
-	if err != nil {
-		return nil, err
-	}
-	// Restore Conn-level deadlines
-	if ok && isNetConn {
-		if err := connection.SetReadDeadline(time.Time{}); err != nil {
-			return nil, err
-		}
-	}
 	if response == nil {
 		return nil, errors.New("unexpected empty frame")
 	}
@@ -1032,4 +1022,25 @@ func (c *Conn) finishReceipt(done chan struct{}) {
 	case c.receiptWakeCh <- struct{}{}:
 	default:
 	}
+}
+
+func exchangeHandshake(ctx context.Context, conn io.ReadWriteCloser, reader *frame.Reader, writer *frame.Writer, request *frame.Frame) (response *frame.Frame, err error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	canceled := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		_ = conn.Close()
+		close(canceled)
+	})
+	defer func() {
+		if !stop() {
+			<-canceled
+			response, err = nil, ctx.Err()
+		}
+	}()
+	if err = writer.Write(request); err != nil {
+		return nil, err
+	}
+	return reader.Read()
 }
