@@ -89,13 +89,19 @@ func (r *Reader) Read() (*Frame, error) {
 			return nil, ErrInvalidFrameFormat
 		}
 
-		name, err := unencodeValue(headerSlice[0:index])
-		if err != nil {
-			return nil, err
-		}
-		value, err := unencodeValue(headerSlice[index+1:])
-		if err != nil {
-			return nil, err
+		var name, value string
+		if headersShouldBeEscaped(f.Command) {
+			name, err = unencodeValue(headerSlice[0:index])
+			if err != nil {
+				return nil, err
+			}
+			value, err = unencodeValue(headerSlice[index+1:])
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			name = string(headerSlice[0:index])
+			value = string(headerSlice[index+1:])
 		}
 
 		//println("   ", name, ":", value)

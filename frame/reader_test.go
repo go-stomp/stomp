@@ -23,6 +23,37 @@ func TestReaderConnect(t *testing.T) {
 	require.ErrorIs(t, err, io.EOF)
 }
 
+func TestReaderConnectHeadersAreNotUnescaped(t *testing.T) {
+	for _, command := range []string{CONNECT, CONNECTED} {
+		for _, suffix := range []string{`\c`, `\n`, `\r`, `\\`, `\q`} {
+			t.Run(command+"/"+suffix, func(t *testing.T) {
+				key := "key" + suffix
+				value := "value:with:colons" + suffix
+				wire := command + "\n" + key + ":" + value + "\n\n\x00"
+				f, err := NewReader(strings.NewReader(wire)).Read()
+				require.NoError(t, err)
+				require.Equal(t, command, f.Command)
+				gotKey, gotValue := f.Header.GetAt(0)
+				require.Equal(t, key, gotKey)
+				require.Equal(t, value, gotValue)
+			})
+		}
+	}
+}
+
+func TestReaderOtherFrameHeadersAreUnescaped(t *testing.T) {
+	for _, command := range []string{STOMP, SEND, MESSAGE} {
+		t.Run(command, func(t *testing.T) {
+			wire := command + "\n" + `key\c\n\r\\:value\c\n\r\\` + "\n\n\x00"
+			f, err := NewReader(strings.NewReader(wire)).Read()
+			require.NoError(t, err)
+			key, value := f.Header.GetAt(0)
+			require.Equal(t, "key:\n\r\\", key)
+			require.Equal(t, "value:\n\r\\", value)
+		})
+	}
+}
+
 func TestReaderMultipleReads(t *testing.T) {
 	text := "SEND\ndestination:xxx\n\nPayload\x00\n" +
 		"SEND\ndestination:yyy\ncontent-length:12\n" +

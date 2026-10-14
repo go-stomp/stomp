@@ -61,6 +61,26 @@ func TestWriterConnectHeadersAreNotEscaped(t *testing.T) {
 	}
 }
 
+func TestWriterReaderConnectHeadersRoundTrip(t *testing.T) {
+	for _, command := range []string{CONNECT, CONNECTED} {
+		for _, suffix := range []string{`\c`, `\n`, `\r`, `\\`, `\q`} {
+			t.Run(command+"/"+suffix, func(t *testing.T) {
+				key := "key" + suffix
+				value := "value:with:colons" + suffix
+				var buffer bytes.Buffer
+				err := NewWriter(&buffer).Write(New(command, key, value))
+				require.NoError(t, err)
+				f, err := NewReader(&buffer).Read()
+				require.NoError(t, err)
+				require.Equal(t, command, f.Command)
+				gotKey, gotValue := f.Header.GetAt(0)
+				require.Equal(t, key, gotKey)
+				require.Equal(t, value, gotValue)
+			})
+		}
+	}
+}
+
 func TestWriterOtherFrameHeadersAreEscaped(t *testing.T) {
 	for _, command := range []string{STOMP, SEND} {
 		t.Run(command, func(t *testing.T) {
