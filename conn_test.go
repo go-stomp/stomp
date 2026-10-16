@@ -3,6 +3,8 @@ package stomp
 import (
 	"context"
 	"fmt"
+	"runtime"
+	"strings"
 	"io"
 	"net"
 	"sync"
@@ -1157,6 +1159,50 @@ func TestSendDoesNotDeadlockWhenProcessLoopExits(t *testing.T) {
 		require.ErrorIs(t, err, ErrClosedUnexpectedly)
 	case <-time.After(5 * time.Second):
 		t.Fatal("Send blocked after processLoop exited")
+	}
+}
+
+// readLoop used to block forever handing processLoop a frame after
+// processLoop had already exited, leaking the goroutine and its frames.
+func TestReadLoopExitsWithProcessLoop(t *testing.T) {
+	fc1, fc2 := testutil.NewFakeConn(t)
+	defer func() { _ = fc2.Close() }()
+
+	go func() {
+		reader := frame.NewReader(fc2)
+		writer := frame.NewWriter(fc2)
+		if _, err := reader.Read(); err != nil {
+			return
+		}
+		if writer.Write(frame.New(frame.CONNECTED)) != nil {
+			return
+		}
+		// processLoop exits on the ERROR, with more frames behind it than
+		// readCh can hold
+		if writer.Write(frame.New(frame.ERROR, frame.Message, "bye")) != nil {
+			return
+		}
+		for i := 0; i < 5; i++ {
+			if writer.Write(frame.New(frame.RECEIPT, frame.ReceiptId, "x")) != nil {
+				return
+			}
+		}
+	}()
+
+	client, err := Connect(fc1, ConnOpt.ReadChannelCapacity(1))
+	require.NoError(t, err)
+	<-client.processLoopDone
+
+	readLoop := fmt.Sprintf("stomp/v3.readLoop(%p,", client)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		buf := make([]byte, 1<<20)
+		buf = buf[:runtime.Stack(buf, true)]
+		if !strings.Contains(string(buf), readLoop) {
+			break
+		}
+		require.True(t, time.Now().Before(deadline), "readLoop did not exit")
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

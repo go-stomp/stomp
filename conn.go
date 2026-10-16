@@ -333,7 +333,12 @@ func readLoop(c *Conn, reader *frame.Reader) {
 		if c.statsEnabled {
 			c.readsReceived.Add(1)
 		}
-		c.readCh <- f
+		select {
+		case c.readCh <- f:
+		case <-c.processLoopDone:
+			// nothing will read readCh any more
+			return
+		}
 	}
 }
 
