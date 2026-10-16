@@ -278,3 +278,38 @@ func TestUnsubscribeAfterDisconnectDoesNotPanic(t *testing.T) {
 		}
 	}
 }
+
+// A subscriber that doesn't read C used to block processLoop, so nothing else
+// got written, not even heart-beats, and a dropped connection went unnoticed.
+func TestStalledSubscriberDoesNotBlockConnection(t *testing.T) {
+	fc1, fc2 := testutil.NewFakeConn(t)
+	defer func() { _ = fc1.Close() }()
+	received := floodServer(fc2, 100)
+
+	client, err := Connect(fc1, ConnOpt.MsgSendTimeout(100*time.Millisecond))
+	require.NoError(t, err)
+	_, err = client.Subscribe("/queue/test", AckAuto)
+	require.NoError(t, err)
+	// let the in-flight messages back up behind the subscription
+	time.Sleep(100 * time.Millisecond)
+
+	require.NoError(t, client.Send("/queue/other", "text/plain", []byte("hello")))
+	select {
+	case f := <-received:
+		require.Equal(t, frame.SEND, f.Command)
+	case <-time.After(5 * time.Second):
+		t.Fatal("SEND was not written")
+	}
+
+	_ = fc2.Close()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		err := client.Send("/queue/other", "text/plain", []byte("hello"))
+		if err != nil {
+			require.ErrorIs(t, err, ErrAlreadyClosed)
+			break
+		}
+		require.True(t, time.Now().Before(deadline), "connection loss went unnoticed")
+		time.Sleep(10 * time.Millisecond)
+	}
+}

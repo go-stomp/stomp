@@ -1159,3 +1159,45 @@ func TestSendDoesNotDeadlockWhenProcessLoopExits(t *testing.T) {
 		t.Fatal("Send blocked after processLoop exited")
 	}
 }
+
+// A SUBSCRIBE still queued when processLoop exits was never registered, so
+// nothing closed its frame channel and Subscription.C never closed.
+func TestQueuedSubscribeClosedWhenProcessLoopExits(t *testing.T) {
+	fc1, fc2 := testutil.NewFakeConn(t)
+	defer func() { _ = fc1.Close() }()
+
+	connected := make(chan struct{})
+	go func() {
+		reader := frame.NewReader(fc2)
+		writer := frame.NewWriter(fc2)
+		if _, err := reader.Read(); err != nil {
+			return
+		}
+		_ = writer.Write(frame.New(frame.CONNECTED))
+		close(connected)
+		// stop reading, so that processLoop blocks writing the SEND below
+	}()
+
+	client, err := Connect(fc1)
+	require.NoError(t, err)
+	<-connected
+
+	require.NoError(t, client.Send("/queue/test", "text/plain", []byte("hello")))
+	sub, err := client.Subscribe("/queue/test", AckAuto)
+	require.NoError(t, err)
+
+	// processLoop exits on the write error with the SUBSCRIBE still queued
+	_ = fc2.Close()
+
+	timeout := time.After(5 * time.Second)
+	for {
+		select {
+		case _, ok := <-sub.C:
+			if !ok {
+				return
+			}
+		case <-timeout:
+			t.Fatal("Subscription.C was not closed")
+		}
+	}
+}

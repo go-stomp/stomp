@@ -199,12 +199,16 @@ func (s *Subscription) readLoop(ch chan *frame.Frame) {
 	for {
 		f, ok := <-ch
 		if !ok {
-			state := s.state.Load()
-			if state == subStateActive || state == subStateClosing {
-				msg := s.subscriptionErrorMessage("channel read failed")
-				s.closeChannel(msg)
+			// processLoop closes ch when the connection goes away, and leaves
+			// the reason in closeFrame to be handled like an ERROR below.
+			if f = s.conn.closeFrame.Load(); f == nil {
+				state := s.state.Load()
+				if state == subStateActive || state == subStateClosing {
+					msg := s.subscriptionErrorMessage("channel read failed")
+					s.closeChannel(msg)
+				}
+				return
 			}
-			return
 		}
 
 		switch f.Command {

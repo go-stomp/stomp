@@ -47,6 +47,7 @@ type Conn struct {
 	doneCh                    chan struct{}
 	receiptWakeCh             chan struct{}
 	processLoopDone           chan struct{}
+	closeFrame                atomic.Pointer[frame.Frame] // why processLoop closed the subscriptions
 	version                   Version
 	session                   string
 	server                    string
@@ -76,6 +77,13 @@ type writeRequest struct {
 	// channel and must not be closed by the RECEIPT.
 	ReceiptC chan *frame.Frame
 	Done     <-chan struct{}
+}
+
+// A delivery is a frame processLoop has yet to hand to a subscription.
+type delivery struct {
+	ch    chan *frame.Frame
+	f     *frame.Frame
+	close bool // close ch once f is delivered
 }
 
 // Dial creates a network connection to a STOMP server and performs
@@ -341,9 +349,47 @@ func processLoop(c *Conn, writer *frame.Writer) {
 	var writeTimeoutChannel <-chan time.Time
 	var writeTimer *time.Timer
 
+	// Frames for subscriptions, in arrival order. While any are pending,
+	// processLoop stops reading, which pushes back on the server, but keeps
+	// writing, so a slow subscriber doesn't stall heart-beats and other
+	// writes.
+	var deliveries []delivery
+
+	// Closing rather than sending f lets processLoop exit even if a
+	// subscriber stopped reading; each subscription picks f up from
+	// closeFrame.
+	closeSubscriptions := func(f *frame.Frame) {
+		c.closeFrame.Store(f)
+		for _, ch := range channels {
+			close(ch)
+		}
+		for _, d := range deliveries {
+			if d.close {
+				close(d.ch)
+			}
+		}
+	}
+
 	defer func() {
 		if err := c.MustDisconnect(); err != nil {
 			c.log.Errorf("error disconnecting: %v", err)
+		}
+		// Requests are only queued under closeMutex while the connection is
+		// open, so the queue can no longer grow. Close the channels of
+		// subscriptions that were queued but never registered, so that their
+		// readLoops end like those closeSubscriptions handled.
+		for {
+			select {
+			case req, ok := <-c.writeCh:
+				if !ok {
+					return
+				}
+				if req.Frame.Command == frame.SUBSCRIBE {
+					close(req.C)
+				}
+			default:
+				return
+			}
 		}
 	}()
 
@@ -359,7 +405,7 @@ func processLoop(c *Conn, writer *frame.Writer) {
 	defer exited()
 
 	for {
-		if c.readTimeout > 0 && readTimer == nil {
+		if c.readTimeout > 0 && readTimer == nil && len(deliveries) == 0 {
 			readTimer = time.NewTimer(time.Duration(float64(c.readTimeout) * c.hbGracePeriodMultiplier))
 			readTimeoutChannel = readTimer.C
 		}
@@ -368,7 +414,27 @@ func processLoop(c *Conn, writer *frame.Writer) {
 			writeTimeoutChannel = writeTimer.C
 		}
 
+		readCh := c.readCh
+		var deliverCh chan *frame.Frame
+		var next *frame.Frame
+		if len(deliveries) > 0 {
+			readCh = nil
+			deliverCh, next = deliveries[0].ch, deliveries[0].f
+		}
+
 		select {
+		case deliverCh <- next:
+			if deliveries[0].close {
+				close(deliverCh)
+			}
+			deliveries[0] = delivery{}
+			deliveries = deliveries[1:]
+
+		case <-c.doneCh:
+			// Disconnect closed the connection
+			closeSubscriptions(errorFrame(newErrorMessage("connection closed")))
+			return
+
 		case <-c.receiptWakeCh:
 			for id, req := range receipts {
 				select {
@@ -379,21 +445,20 @@ func processLoop(c *Conn, writer *frame.Writer) {
 			}
 		case <-readTimeoutChannel:
 			// read timeout, close the connection
-			err := newErrorMessage("read timeout")
-			sendError(channels, err)
+			closeSubscriptions(errorFrame(newErrorMessage("read timeout")))
 			return
 
 		case <-writeTimeoutChannel:
 			// write timeout, send a heart-beat frame
 			err := writer.Write(nil)
 			if err != nil {
-				sendError(channels, err)
+				closeSubscriptions(errorFrame(err))
 				return
 			}
 			writeTimer = nil
 			writeTimeoutChannel = nil
 
-		case f, ok := <-c.readCh:
+		case f, ok := <-readCh:
 			// stop the read timer
 			if readTimer != nil {
 				readTimer.Stop()
@@ -402,8 +467,7 @@ func processLoop(c *Conn, writer *frame.Writer) {
 			}
 
 			if !ok {
-				err := newErrorMessage("connection closed")
-				sendError(channels, err)
+				closeSubscriptions(errorFrame(newErrorMessage("connection closed")))
 				return
 			}
 
@@ -423,14 +487,12 @@ func processLoop(c *Conn, writer *frame.Writer) {
 					if subID, ok := unsubscribing[id]; ok {
 						delete(unsubscribing, id)
 						if ch, ok := channels[subID]; ok {
-							ch <- f
 							delete(channels, subID)
-							close(ch)
+							deliveries = append(deliveries, delivery{ch: ch, f: f, close: true})
 						}
 					}
 				} else {
-					err := &Error{Message: "missing receipt-id", Frame: f}
-					sendError(channels, err)
+					closeSubscriptions(errorFrame(&Error{Message: "missing receipt-id", Frame: f}))
 					return
 				}
 
@@ -441,17 +503,13 @@ func processLoop(c *Conn, writer *frame.Writer) {
 					close(req.C)
 					delete(receipts, id)
 				}
-				for _, ch := range channels {
-					ch <- f
-					close(ch)
-				}
-
+				closeSubscriptions(f)
 				return
 
 			case frame.MESSAGE:
 				if id, ok := f.Header.Contains(frame.Subscription); ok {
 					if ch, ok := channels[id]; ok {
-						ch <- f
+						deliveries = append(deliveries, delivery{ch: ch, f: f})
 					} else {
 						c.log.Infof("ignored MESSAGE for subscription: %s", id)
 					}
@@ -466,7 +524,7 @@ func processLoop(c *Conn, writer *frame.Writer) {
 				writeTimeoutChannel = nil
 			}
 			if !ok {
-				sendError(channels, errors.New("write channel closed"))
+				closeSubscriptions(errorFrame(errors.New("write channel closed")))
 				return
 			}
 			if receipt, ok := req.Frame.Header.Contains(frame.Receipt); ok {
@@ -504,10 +562,12 @@ func processLoop(c *Conn, writer *frame.Writer) {
 
 			case frame.UNSUBSCRIBE:
 				if replyTo, ok := req.Frame.Header.Contains(ReplyToHeader); ok {
-					ch, ok := channels[replyTo]
-					if ok {
+					if ch, ok := channels[replyTo]; ok {
 						delete(channels, replyTo)
-						close(ch)
+						// No RECEIPT will come from the server, so make one up. It
+						// can't be closed right away: deliveries may still be
+						// queued for it.
+						deliveries = append(deliveries, delivery{ch: ch, f: frame.New(frame.RECEIPT), close: true})
 					}
 					sendFrame = false
 				} else {
@@ -525,7 +585,7 @@ func processLoop(c *Conn, writer *frame.Writer) {
 			if sendFrame {
 				err := writer.Write(req.Frame)
 				if err != nil {
-					sendError(channels, err)
+					closeSubscriptions(errorFrame(err))
 					return
 				}
 			}
@@ -533,12 +593,8 @@ func processLoop(c *Conn, writer *frame.Writer) {
 	}
 }
 
-// Send an error to all receipt channels.
-func sendError(m map[string]chan *frame.Frame, err error) {
-	frame := frame.New(frame.ERROR, frame.Message, err.Error())
-	for _, ch := range m {
-		ch <- frame
-	}
+func errorFrame(err error) *frame.Frame {
+	return frame.New(frame.ERROR, frame.Message, err.Error())
 }
 
 // Disconnect will disconnect from the STOMP server. This function
