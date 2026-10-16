@@ -89,10 +89,10 @@ func (s *Subscription) Unsubscribe(opts ...func(*frame.Frame) error) error {
 		f.Header.Set(ReplyToHeader, s.id)
 	}
 
+	// Only readLoop may send on or close C: it may be in the middle of a send
+	// right now. It closes C itself once the connection is torn down.
 	err := s.conn.sendFrame(f)
 	if errors.Is(err, ErrClosedUnexpectedly) {
-		msg := s.subscriptionErrorMessage("connection closed unexpectedly")
-		s.closeChannel(msg)
 		return err
 	}
 
@@ -112,13 +112,6 @@ func (s *Subscription) Unsubscribe(opts ...func(*frame.Frame) error) error {
 	case <-s.done:
 		return nil
 	case <-time.After(s.unsubscribeReceiptTimeout):
-		// s.done closing can race with the timeout firing; closeChannel closes
-		// s.C before s.done, so re-check state to avoid sending on a closed s.C.
-		if s.state.Load() == subStateClosed {
-			return nil
-		}
-		msg := s.subscriptionErrorMessage("channel unsubscribe receipt timeout")
-		s.C <- msg
 		return &ErrUnsubscribeReceiptTimeout
 	}
 }

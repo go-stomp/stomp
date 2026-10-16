@@ -248,3 +248,33 @@ func TestUnsubscribeFromConsumerDoesNotDeadlock(t *testing.T) {
 		t.Fatal("Unsubscribe blocked")
 	}
 }
+
+// Unsubscribe after Disconnect gave up waiting for its receipt used to close C
+// while readLoop was still sending to it messages processLoop had buffered.
+func TestUnsubscribeAfterDisconnectDoesNotPanic(t *testing.T) {
+	for i := 0; i < 20; i++ {
+		fc1, fc2 := testutil.NewFakeConn(t)
+		floodServer(fc2, 200)
+
+		client, err := Connect(fc1, ConnOpt.DisconnectReceiptTimeout(50*time.Millisecond))
+		require.NoError(t, err)
+		sub, err := client.Subscribe("/queue/test", AckAuto)
+		require.NoError(t, err)
+
+		consumed := make(chan struct{})
+		go func() {
+			defer close(consumed)
+			for range sub.C {
+				time.Sleep(time.Millisecond)
+			}
+		}()
+
+		_ = client.Disconnect()
+		require.ErrorIs(t, sub.Unsubscribe(), ErrClosedUnexpectedly)
+		select {
+		case <-consumed:
+		case <-time.After(5 * time.Second):
+			t.Fatal("C was not closed")
+		}
+	}
+}
