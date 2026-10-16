@@ -1,6 +1,7 @@
 package frame
 
 import (
+	"math"
 	"strconv"
 )
 
@@ -168,7 +169,7 @@ func (h *Header) ContentLength() (value int, ok bool, err error) {
 		return 0, true, err
 	}
 
-	if n > uint64(^uint(0)>>1) {
+	if n > uint64(math.MaxInt) {
 		return 0, true, strconv.ErrRange
 	}
 	value = int(n)
