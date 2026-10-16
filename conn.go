@@ -88,7 +88,8 @@ func Dial(network, addr string, opts ...func(*Conn) error) (*Conn, error) {
 // DialWithContext dials and performs the STOMP handshake within ctx.
 // Cancellation after the handshake does not close the connection.
 func DialWithContext(ctx context.Context, network, addr string, opts ...func(*Conn) error) (*Conn, error) {
-	c, err := (&net.Dialer{}).DialContext(ctx, network, addr)
+	var dialer net.Dialer
+	c, err := dialer.DialContext(ctx, network, addr)
 	if err != nil {
 		return nil, err
 	}
@@ -1036,6 +1037,8 @@ func exchangeHandshake(ctx context.Context, conn io.ReadWriteCloser, reader *fra
 		close(canceled)
 	})
 	defer func() {
+		// Unregister the callback so later cancellation leaves the connection open.
+		// If it already started, wait for Close to finish and return the context error.
 		if !stop() {
 			<-canceled
 			response, err = nil, ctx.Err()
