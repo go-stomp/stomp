@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"slices"
 )
 
 const (
@@ -20,11 +21,9 @@ var (
 	ErrInvalidFrameFormat = errors.New("invalid frame format")
 )
 
-// The Reader type reads STOMP frames from an underlying io.Reader.
-// The reader is buffered, and the size of the buffer is the maximum
-// size permitted for the STOMP frame command and header section.
-// A STOMP frame is rejected if its command and header section exceed
-// the buffer size.
+// The Reader type reads STOMP frames from a buffered io.Reader.
+// The buffer size controls buffering only; it does not limit the size of
+// frame commands, headers, or bodies.
 type Reader struct {
 	reader *bufio.Reader
 }
@@ -115,13 +114,9 @@ func (r *Reader) Read() (*Frame, error) {
 		return nil, err
 	} else if ok {
 		// content length specified in the header, so use that
-		f.Body = make([]byte, contentLength)
-		for bytesRead := 0; bytesRead < contentLength; {
-			n, err := r.reader.Read(f.Body[bytesRead:contentLength])
-			if err != nil {
-				return nil, err
-			}
-			bytesRead += n
+		f.Body, err = readBody(r.reader, contentLength)
+		if err != nil {
+			return nil, err
 		}
 
 		// read the next byte and verify that it is a null byte
@@ -143,6 +138,27 @@ func (r *Reader) Read() (*Frame, error) {
 
 	// pass back frame
 	return f, nil
+}
+
+// bodyChunkSize is the initial capacity of a content-length body buffer.
+const bodyChunkSize = 64 * 1024
+
+// readBody reads exactly n bytes. The buffer grows as data arrives instead of
+// being allocated up front, because n comes from the untrusted content-length
+// header: a few bytes on the wire must not be able to allocate gigabytes.
+func readBody(r io.Reader, n int) ([]byte, error) {
+	body := make([]byte, 0, min(n, bodyChunkSize))
+	for len(body) < n {
+		if len(body) == cap(body) {
+			body = slices.Grow(body, min(n-len(body), cap(body)))
+		}
+		m, err := r.Read(body[len(body):min(n, cap(body))])
+		body = body[:len(body)+m]
+		if err != nil {
+			return nil, err
+		}
+	}
+	return body, nil
 }
 
 // read one line from input and strip off terminating LF or terminating CR-LF

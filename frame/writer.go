@@ -66,6 +66,9 @@ func (w *Writer) Write(f *Frame) error {
 			return err
 		}
 	} else {
+		if err := f.ValidateBody(); err != nil {
+			return err
+		}
 		needEscapeHeaders := headersShouldBeEscaped(f.Command)
 		if !needEscapeHeaders {
 			if err = validateUnescapedHeaders(f.Header); err != nil {

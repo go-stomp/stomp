@@ -1018,7 +1018,7 @@ func TestStompTimeoutTriggers(t *testing.T) {
 		C:     make(chan *frame.Frame),
 	}
 
-	err := readReceiptWithTimeout(request.C, timeout, ErrMsgReceiptTimeout)
+	err := readReceiptWithTimeout(request.C, timeout, ErrMsgReceiptTimeout, nil)
 
 	require.Error(t, err)
 }
@@ -1036,7 +1036,7 @@ func TestStompChannelReceviesReceipt(t *testing.T) {
 	}
 
 	go sendFrameHelper(&receipt, request.C)
-	err := readReceiptWithTimeout(request.C, timeout, ErrMsgReceiptTimeout)
+	err := readReceiptWithTimeout(request.C, timeout, ErrMsgReceiptTimeout, nil)
 
 	require.NoError(t, err)
 }
@@ -1054,7 +1054,7 @@ func TestStompChannelReceviesNonReceipt(t *testing.T) {
 	}
 
 	go sendFrameHelper(&receipt, request.C)
-	err := readReceiptWithTimeout(request.C, timeout, ErrMsgReceiptTimeout)
+	err := readReceiptWithTimeout(request.C, timeout, ErrMsgReceiptTimeout, nil)
 
 	require.Error(t, err)
 }
@@ -1072,7 +1072,7 @@ func TestStompZeroTimeout(t *testing.T) {
 	}
 
 	go sendFrameHelper(&receipt, request.C)
-	err := readReceiptWithTimeout(request.C, timeout, ErrMsgReceiptTimeout)
+	err := readReceiptWithTimeout(request.C, timeout, ErrMsgReceiptTimeout, nil)
 
 	require.NoError(t, err)
 }

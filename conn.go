@@ -44,6 +44,8 @@ type Conn struct {
 	conn                      io.ReadWriteCloser
 	readCh                    chan *frame.Frame
 	writeCh                   chan writeRequest
+	doneCh                    chan struct{}
+	receiptWakeCh             chan struct{}
 	version                   Version
 	session                   string
 	server                    string
@@ -72,6 +74,7 @@ type writeRequest struct {
 	// Used by SUBSCRIBE requests, where C is the subscription's own message
 	// channel and must not be closed by the RECEIPT.
 	ReceiptC chan *frame.Frame
+	Done     <-chan struct{}
 }
 
 // Dial creates a network connection to a STOMP server and performs
@@ -82,8 +85,11 @@ func Dial(network, addr string, opts ...func(*Conn) error) (*Conn, error) {
 	return DialWithContext(context.Background(), network, addr, opts...)
 }
 
+// DialWithContext dials and performs the STOMP handshake within ctx.
+// Cancellation after the handshake does not close the connection.
 func DialWithContext(ctx context.Context, network, addr string, opts ...func(*Conn) error) (*Conn, error) {
-	c, err := net.Dial(network, addr)
+	var dialer net.Dialer
+	c, err := dialer.DialContext(ctx, network, addr)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +120,13 @@ func Connect(conn io.ReadWriteCloser, opts ...func(*Conn) error) (*Conn, error) 
 	return ConnectWithContext(context.Background(), conn, opts...)
 }
 
+// ConnectWithContext performs the STOMP handshake within ctx. Cancellation
+// during the handshake closes conn to interrupt pending reads and writes.
+// Cancellation after the handshake does not close the connection.
 func ConnectWithContext(ctx context.Context, conn io.ReadWriteCloser, opts ...func(*Conn) error) (*Conn, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	reader := frame.NewReader(conn)
 	writer := frame.NewWriter(conn)
 
@@ -153,6 +165,8 @@ func ConnectWithContext(ctx context.Context, conn io.ReadWriteCloser, opts ...fu
 
 	c.readCh = make(chan *frame.Frame, readChannelCapacity)
 	c.writeCh = make(chan writeRequest, writeChannelCapacity)
+	c.receiptWakeCh = make(chan struct{}, 1)
+	c.doneCh = make(chan struct{})
 
 	if options.Host == "" {
 		// host not specified yet, attempt to get from net.Conn if possible
@@ -173,29 +187,11 @@ func ConnectWithContext(ctx context.Context, conn io.ReadWriteCloser, opts ...fu
 		return nil, err
 	}
 
-	err = writer.Write(connectFrame)
+	response, err := exchangeHandshake(ctx, conn, reader, writer, connectFrame)
 	if err != nil {
 		return nil, err
 	}
 
-	connection, isNetConn := conn.(net.Conn)
-	deadline, ok := ctx.Deadline()
-	if ok && isNetConn {
-		if err := connection.SetReadDeadline(deadline); err != nil {
-			return nil, err
-		}
-	}
-
-	response, err := reader.Read()
-	if err != nil {
-		return nil, err
-	}
-	// Restore Conn-level deadlines
-	if ok && isNetConn {
-		if err := connection.SetReadDeadline(time.Time{}); err != nil {
-			return nil, err
-		}
-	}
 	if response == nil {
 		return nil, errors.New("unexpected empty frame")
 	}
@@ -335,6 +331,8 @@ func readLoop(c *Conn, reader *frame.Reader) {
 // the server.
 func processLoop(c *Conn, writer *frame.Writer) {
 	channels := make(map[string]chan *frame.Frame)
+	receipts := make(map[string]writeRequest)
+	unsubscribing := make(map[string]string)
 
 	var readTimeoutChannel <-chan time.Time
 	var readTimer *time.Timer
@@ -344,6 +342,12 @@ func processLoop(c *Conn, writer *frame.Writer) {
 	defer func() {
 		if err := c.MustDisconnect(); err != nil {
 			c.log.Errorf("error disconnecting: %v", err)
+		}
+	}()
+
+	defer func() {
+		for _, req := range receipts {
+			close(req.C)
 		}
 	}()
 
@@ -358,6 +362,14 @@ func processLoop(c *Conn, writer *frame.Writer) {
 		}
 
 		select {
+		case <-c.receiptWakeCh:
+			for id, req := range receipts {
+				select {
+				case <-req.Done:
+					delete(receipts, id)
+				default:
+				}
+			}
 		case <-readTimeoutChannel:
 			// read timeout, close the connection
 			err := newErrorMessage("read timeout")
@@ -396,10 +408,18 @@ func processLoop(c *Conn, writer *frame.Writer) {
 			switch f.Command {
 			case frame.RECEIPT:
 				if id, ok := f.Header.Contains(frame.ReceiptId); ok {
-					if ch, ok := channels[id]; ok {
-						ch <- f
-						delete(channels, id)
-						close(ch)
+					if req, ok := receipts[id]; ok {
+						req.C <- f
+						close(req.C)
+						delete(receipts, id)
+					}
+					if subID, ok := unsubscribing[id]; ok {
+						delete(unsubscribing, id)
+						if ch, ok := channels[subID]; ok {
+							ch <- f
+							delete(channels, subID)
+							close(ch)
+						}
 					}
 				} else {
 					err := &Error{Message: "missing receipt-id", Frame: f}
@@ -409,16 +429,14 @@ func processLoop(c *Conn, writer *frame.Writer) {
 
 			case frame.ERROR:
 				c.log.Error("received ERROR; Closing underlying connection")
+				for id, req := range receipts {
+					req.C <- f
+					close(req.C)
+					delete(receipts, id)
+				}
 				for _, ch := range channels {
 					ch <- f
 					close(ch)
-				}
-
-				c.closeMutex.Lock()
-				defer c.closeMutex.Unlock()
-				c.closed = true
-				if err := c.conn.Close(); err != nil {
-					c.log.Errorf("error closing connection: %v", err)
 				}
 
 				return
@@ -445,11 +463,19 @@ func processLoop(c *Conn, writer *frame.Writer) {
 				return
 			}
 			if receipt, ok := req.Frame.Header.Contains(frame.Receipt); ok {
+				response := req.C
 				if req.ReceiptC != nil {
-					channels[receipt] = req.ReceiptC
-				} else if req.C != nil {
-					// remember the channel for this receipt
-					channels[receipt] = req.C
+					response = req.ReceiptC
+				}
+				if response != nil {
+					select {
+					case <-req.Done:
+					default:
+						if previous, exists := receipts[receipt]; exists {
+							close(previous.C)
+						}
+						receipts[receipt] = writeRequest{C: response, Done: req.Done}
+					}
 				}
 			}
 
@@ -479,10 +505,12 @@ func processLoop(c *Conn, writer *frame.Writer) {
 					sendFrame = false
 				} else {
 					id, _ := req.Frame.Header.Contains(frame.Id)
-					// is this trying to be too clever -- add a receipt
-					// header so that when the server responds with a
-					// RECEIPT frame, the corresponding channel will be closed
-					req.Frame.Header.Set(frame.Receipt, id)
+					receipt, ok := req.Frame.Header.Contains(frame.Receipt)
+					if !ok {
+						receipt = id
+						req.Frame.Header.Set(frame.Receipt, receipt)
+					}
+					unsubscribing[receipt] = id
 				}
 			}
 
@@ -523,8 +551,11 @@ func (c *Conn) Disconnect() error {
 		c.writesSent.Add(1)
 	}
 
-	ch := make(chan *frame.Frame)
+	ch := make(chan *frame.Frame, 1)
+	done := make(chan struct{})
+	defer c.finishReceipt(done)
 	request := writeRequest{
+		Done:  done,
 		Frame: frame.New(frame.DISCONNECT, frame.Receipt, c.AllocateID()),
 		C:     ch,
 	}
@@ -536,7 +567,7 @@ func (c *Conn) Disconnect() error {
 	}
 	c.closeMutex.Unlock()
 
-	err = readReceiptWithTimeout(ch, c.disconnectReceiptTimeout, ErrDisconnectReceiptTimeout)
+	err = readReceiptWithTimeout(ch, c.disconnectReceiptTimeout, ErrDisconnectReceiptTimeout, c.doneCh)
 
 	c.closeMutex.Lock()
 	defer c.closeMutex.Unlock()
@@ -546,6 +577,9 @@ func (c *Conn) Disconnect() error {
 	}
 
 	c.closed = true
+	if c.doneCh != nil {
+		close(c.doneCh)
+	}
 	_ = c.conn.Close()
 
 	return err
@@ -565,6 +599,9 @@ func (c *Conn) MustDisconnect() error {
 	close(c.writeCh)
 
 	c.closed = true
+	if c.doneCh != nil {
+		close(c.doneCh)
+	}
 	return c.conn.Close()
 }
 
@@ -579,13 +616,14 @@ func (c *Conn) MustDisconnect() error {
 // to receive a RECEIPT, should the content-length be suppressed, and sending custom header entries.
 func (c *Conn) Send(destination, contentType string, body []byte, opts ...func(*frame.Frame) error) error {
 	c.closeMutex.Lock()
-	defer c.closeMutex.Unlock()
 	if c.closed {
+		c.closeMutex.Unlock()
 		return ErrAlreadyClosed
 	}
 
 	f, err := createSendFrame(c, destination, contentType, body, opts)
 	if err != nil {
+		c.closeMutex.Unlock()
 		return err
 	}
 
@@ -595,17 +633,21 @@ func (c *Conn) Send(destination, contentType string, body []byte, opts ...func(*
 
 	if _, ok := f.Header.Contains(frame.Receipt); ok {
 		// receipt required
+		done := make(chan struct{})
+		defer c.finishReceipt(done)
 		request := writeRequest{
 			Frame: f,
-			C:     make(chan *frame.Frame),
+			C:     make(chan *frame.Frame, 1),
+			Done:  done,
 		}
 
 		err := sendDataToWriteChWithTimeout(c.writeCh, request, c.msgSendTimeout)
+		c.closeMutex.Unlock()
 		if err != nil {
 			return err
 		}
 
-		err = readReceiptWithTimeout(request.C, c.rcvReceiptTimeout, ErrMsgReceiptTimeout)
+		err = readReceiptWithTimeout(request.C, c.rcvReceiptTimeout, ErrMsgReceiptTimeout, c.doneCh)
 		if err != nil {
 			return err
 		}
@@ -614,6 +656,7 @@ func (c *Conn) Send(destination, contentType string, body []byte, opts ...func(*
 		request := writeRequest{Frame: f}
 
 		err := sendDataToWriteChWithTimeout(c.writeCh, request, c.msgSendTimeout)
+		c.closeMutex.Unlock()
 		if err != nil {
 			return err
 		}
@@ -622,21 +665,37 @@ func (c *Conn) Send(destination, contentType string, body []byte, opts ...func(*
 	return nil
 }
 
-func readReceiptWithTimeout(responseChan chan *frame.Frame, timeout time.Duration, timeoutErr error) error {
+func readReceiptWithTimeout(responseChan chan *frame.Frame, timeout time.Duration, timeoutErr error, closed <-chan struct{}) error {
 	var timeoutChan <-chan time.Time
 	if timeout > 0 {
 		timeoutChan = time.After(timeout)
 	}
 
 	select {
+	case <-closed:
+		// processLoop delivers into the buffered responseChan before closed is
+		// closed, so a response that is already there must win over the close.
+		select {
+		case response, ok := <-responseChan:
+			return receiptResult(response, ok)
+		default:
+			return ErrClosedUnexpectedly
+		}
 	case <-timeoutChan:
 		return timeoutErr
-	case response := <-responseChan:
-		if response.Command != frame.RECEIPT {
-			return newError(response)
-		}
-		return nil
+	case response, ok := <-responseChan:
+		return receiptResult(response, ok)
 	}
+}
+
+func receiptResult(response *frame.Frame, ok bool) error {
+	if !ok {
+		return ErrClosedUnexpectedly
+	}
+	if response.Command != frame.RECEIPT {
+		return newError(response)
+	}
+	return nil
 }
 
 func sendDataToWriteChWithTimeout(ch chan writeRequest, request writeRequest, timeout time.Duration) error {
@@ -684,6 +743,9 @@ func createSendFrame(conn *Conn, destination, contentType string, body []byte, o
 		f.Header.Set(frame.Receipt, conn.AllocateID())
 	}
 
+	if err := f.ValidateBody(); err != nil {
+		return nil, err
+	}
 	return f, nil
 }
 
@@ -704,9 +766,12 @@ func (c *Conn) sendFrame(f *frame.Frame) error {
 
 	if _, ok := f.Header.Contains(frame.Receipt); ok {
 		// receipt required
+		done := make(chan struct{})
+		defer c.finishReceipt(done)
 		request := writeRequest{
 			Frame: f,
-			C:     make(chan *frame.Frame),
+			C:     make(chan *frame.Frame, 1),
+			Done:  done,
 		}
 
 		err := sendDataToWriteChWithTimeout(c.writeCh, request, c.msgSendTimeout)
@@ -719,25 +784,7 @@ func (c *Conn) sendFrame(f *frame.Frame) error {
 		// close mutex while we wait for our response
 		c.closeMutex.Unlock()
 
-		var response *frame.Frame
-
-		if c.writeTimeout > 0 {
-			select {
-			case response, ok = <-request.C:
-			case <-time.After(c.writeTimeout):
-				ok = false
-			}
-		} else {
-			response, ok = <-request.C
-		}
-
-		if ok {
-			if response.Command != frame.RECEIPT {
-				return newError(response)
-			}
-		} else {
-			return ErrClosedUnexpectedly
-		}
+		return readReceiptWithTimeout(request.C, c.writeTimeout, ErrClosedUnexpectedly, c.doneCh)
 	} else {
 		// no receipt required
 		request := writeRequest{Frame: f}
@@ -822,6 +869,9 @@ func (c *Conn) Subscribe(destination string, ack AckMode, opts ...func(*frame.Fr
 	var receiptC chan *frame.Frame
 	if _, ok := subscribeFrame.Header.Contains(frame.Receipt); ok {
 		receiptC = make(chan *frame.Frame, 1)
+		done := make(chan struct{})
+		defer c.finishReceipt(done)
+		request.Done = done
 		request.ReceiptC = receiptC
 	}
 
@@ -852,7 +902,7 @@ func (c *Conn) Subscribe(destination string, ack AckMode, opts ...func(*frame.Fr
 	c.closeMutex.Unlock()
 
 	if receiptC != nil {
-		if err := readReceiptWithTimeout(receiptC, c.subscribeReceiptTimeout, ErrSubscribeReceiptTimeout); err != nil {
+		if err := readReceiptWithTimeout(receiptC, c.subscribeReceiptTimeout, ErrSubscribeReceiptTimeout, c.doneCh); err != nil {
 			// The caller gets no handle to sub, so tear it down here or it leaks.
 			sub.abandon()
 			return nil, err
@@ -967,4 +1017,35 @@ func (c *Conn) createAckNackFrame(msg *Message, ack bool) (*frame.Frame, error) 
 func (c *Conn) AllocateID() string {
 	id := atomic.AddUint64(&c.lastId, 1)
 	return strconv.FormatUint(id, 10)
+}
+
+func (c *Conn) finishReceipt(done chan struct{}) {
+	close(done)
+	select {
+	case c.receiptWakeCh <- struct{}{}:
+	default:
+	}
+}
+
+func exchangeHandshake(ctx context.Context, conn io.ReadWriteCloser, reader *frame.Reader, writer *frame.Writer, request *frame.Frame) (response *frame.Frame, err error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	canceled := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		_ = conn.Close()
+		close(canceled)
+	})
+	defer func() {
+		// Unregister the callback so later cancellation leaves the connection open.
+		// If it already started, wait for Close to finish and return the context error.
+		if !stop() {
+			<-canceled
+			response, err = nil, ctx.Err()
+		}
+	}()
+	if err = writer.Write(request); err != nil {
+		return nil, err
+	}
+	return reader.Read()
 }

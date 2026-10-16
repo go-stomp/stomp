@@ -3,6 +3,8 @@ Package frame provides functionality for manipulating STOMP frames.
 */
 package frame
 
+import "bytes"
+
 // A Frame represents a STOMP frame. A frame consists of a command
 // followed by a collection of header entries, and then an optional
 // body.
@@ -35,4 +37,25 @@ func (f *Frame) Clone() *Frame {
 		copy(fc.Body, f.Body)
 	}
 	return fc
+}
+
+// ValidateBody checks that the body agrees with its content-length header.
+// Without content-length, a body must not contain a NULL octet.
+func (f *Frame) ValidateBody() error {
+	if f.Header != nil {
+		length, present, err := f.Header.ContentLength()
+		if err != nil {
+			return err
+		}
+		if present {
+			if length != len(f.Body) {
+				return ErrInvalidFrameFormat
+			}
+			return nil
+		}
+	}
+	if bytes.IndexByte(f.Body, 0) >= 0 {
+		return ErrInvalidFrameFormat
+	}
+	return nil
 }

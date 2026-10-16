@@ -57,6 +57,45 @@ func TestStompSuccessfulUnsubscribeNoTimeout(t *testing.T) {
 	wg.Wait()
 }
 
+func TestStompUnsubscribeWithCallerReceipt(t *testing.T) {
+	wg, fc1, fc2 := runFakeConn(t,
+		assertConnectFrame,
+		sendConnectedFrame,
+		assertSubscribeFrame,
+		func(t testing.TB, reader *frame.Reader, writer *frame.Writer, _ []*frame.Frame) (*frame.Frame, error) {
+			f, err := assertUnsubscribeFrame(t, reader, writer, nil)
+			require.Equal(t, "r1", f.Header.Get(frame.Receipt))
+			return f, err
+		},
+		func(t testing.TB, _ *frame.Reader, writer *frame.Writer, _ []*frame.Frame) (*frame.Frame, error) {
+			f := frame.New(frame.RECEIPT, frame.ReceiptId, "r1")
+			return f, writer.Write(f)
+		},
+	)
+	defer func() { _ = fc1.Close() }()
+	defer func() { _ = fc2.Close() }()
+
+	client, err := Connect(fc1)
+	require.NoError(t, err)
+
+	sub, err := client.Subscribe("/queue/test", AckAuto)
+	require.NoError(t, err)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- sub.Unsubscribe(SubscribeOpt.Header(frame.Receipt, "r1"))
+	}()
+
+	select {
+	case err = <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Unsubscribe did not complete after the RECEIPT for the caller's receipt id")
+	}
+	require.False(t, sub.Active())
+	wg.Wait()
+}
+
 // serverOperation is a function that performs a server operation that either reads or writes a frame and returns it.
 type serverOperation func(t testing.TB, reader *frame.Reader, writer *frame.Writer, previousFrames []*frame.Frame) (*frame.Frame, error)
 
