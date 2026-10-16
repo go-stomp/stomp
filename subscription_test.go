@@ -1,6 +1,7 @@
 package stomp
 
 import (
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -161,5 +162,154 @@ func sendReceiptFrame(frameId int) serverOperation {
 		err := writer.Write(f)
 		require.NoError(t, err)
 		return f, err
+	}
+}
+
+// floodServer is a fake broker that answers the first SUBSCRIBE with n
+// MESSAGEs and confirms UNSUBSCRIBE with a RECEIPT. DISCONNECT is never
+// confirmed. Any other frame it receives is passed on to the returned channel.
+func floodServer(fc *testutil.FakeConn, n int) <-chan *frame.Frame {
+	received := make(chan *frame.Frame, 100)
+	go func() {
+		defer close(received)
+		reader := frame.NewReader(fc)
+		writer := frame.NewWriter(fc)
+		f, err := reader.Read()
+		if err != nil || f.Command != frame.CONNECT {
+			return
+		}
+		if writer.Write(frame.New(frame.CONNECTED, frame.Version, "1.2")) != nil {
+			return
+		}
+
+		// the client may stop reading, so writes must not hold up reading
+		out := make(chan *frame.Frame, n+100)
+		defer close(out)
+		go func() {
+			for f := range out {
+				if writer.Write(f) != nil {
+					return
+				}
+			}
+		}()
+
+		subscribed := false
+		for {
+			f, err := reader.Read()
+			if err != nil {
+				return
+			}
+			if f == nil {
+				continue
+			}
+			switch {
+			case f.Command == frame.SUBSCRIBE && !subscribed:
+				subscribed = true
+				id := f.Header.Get(frame.Id)
+				for i := 0; i < n; i++ {
+					out <- frame.New(frame.MESSAGE,
+						frame.Subscription, id,
+						frame.Destination, "/queue/test",
+						frame.MessageId, strconv.Itoa(i))
+				}
+			case f.Command == frame.UNSUBSCRIBE:
+				out <- frame.New(frame.RECEIPT, frame.ReceiptId, f.Header.Get(frame.Receipt))
+			case f.Command != frame.DISCONNECT:
+				received <- f
+			}
+		}
+	}()
+	return received
+}
+
+// Unsubscribe called by the goroutine reading C, while more messages are in
+// flight than C can hold, used to block readLoop on the full C and
+// processLoop behind it, so the UNSUBSCRIBE never even reached the wire.
+func TestUnsubscribeFromConsumerDoesNotDeadlock(t *testing.T) {
+	fc1, fc2 := testutil.NewFakeConn(t)
+	defer func() { _ = fc1.Close() }()
+	floodServer(fc2, 100)
+
+	client, err := Connect(fc1, ConnOpt.UnsubscribeReceiptTimeout(0))
+	require.NoError(t, err)
+	sub, err := client.Subscribe("/queue/test", AckAuto)
+	require.NoError(t, err)
+
+	<-sub.C
+	// let the in-flight messages fill C
+	time.Sleep(100 * time.Millisecond)
+
+	done := make(chan error, 1)
+	go func() { done <- sub.Unsubscribe() }()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Unsubscribe blocked")
+	}
+}
+
+// Unsubscribe after Disconnect gave up waiting for its receipt used to close C
+// while readLoop was still sending to it messages processLoop had buffered.
+func TestUnsubscribeAfterDisconnectDoesNotPanic(t *testing.T) {
+	for i := 0; i < 20; i++ {
+		fc1, fc2 := testutil.NewFakeConn(t)
+		floodServer(fc2, 200)
+
+		client, err := Connect(fc1, ConnOpt.DisconnectReceiptTimeout(50*time.Millisecond))
+		require.NoError(t, err)
+		sub, err := client.Subscribe("/queue/test", AckAuto)
+		require.NoError(t, err)
+
+		consumed := make(chan struct{})
+		go func() {
+			defer close(consumed)
+			for range sub.C {
+				time.Sleep(time.Millisecond)
+			}
+		}()
+
+		_ = client.Disconnect()
+		require.ErrorIs(t, sub.Unsubscribe(), ErrClosedUnexpectedly)
+		select {
+		case <-consumed:
+		case <-time.After(5 * time.Second):
+			t.Fatal("C was not closed")
+		}
+	}
+}
+
+// A subscriber that doesn't read C used to block processLoop, so nothing else
+// got written, not even heart-beats, and a dropped connection went unnoticed.
+func TestStalledSubscriberDoesNotBlockConnection(t *testing.T) {
+	fc1, fc2 := testutil.NewFakeConn(t)
+	defer func() { _ = fc1.Close() }()
+	received := floodServer(fc2, 100)
+
+	client, err := Connect(fc1, ConnOpt.MsgSendTimeout(100*time.Millisecond))
+	require.NoError(t, err)
+	_, err = client.Subscribe("/queue/test", AckAuto)
+	require.NoError(t, err)
+	// let the in-flight messages back up behind the subscription
+	time.Sleep(100 * time.Millisecond)
+
+	require.NoError(t, client.Send("/queue/other", "text/plain", []byte("hello")))
+	select {
+	case f := <-received:
+		require.Equal(t, frame.SEND, f.Command)
+	case <-time.After(5 * time.Second):
+		t.Fatal("SEND was not written")
+	}
+
+	_ = fc2.Close()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		err := client.Send("/queue/other", "text/plain", []byte("hello"))
+		if err != nil {
+			require.ErrorIs(t, err, ErrAlreadyClosed)
+			break
+		}
+		require.True(t, time.Now().Before(deadline), "connection loss went unnoticed")
+		time.Sleep(10 * time.Millisecond)
 	}
 }

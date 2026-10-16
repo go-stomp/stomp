@@ -29,6 +29,7 @@ type Subscription struct {
 	ackMode                   AckMode
 	state                     atomic.Int32
 	done                      chan struct{}
+	closing                   chan struct{}
 	closeOnce                 sync.Once
 	unsubscribeReceiptTimeout time.Duration
 }
@@ -61,11 +62,16 @@ func (s *Subscription) Active() bool {
 }
 
 // Unsubscribes and closes the channel C.
+//
+// Messages that arrive after Unsubscribe is called are still delivered to C
+// while there is room for them, and discarded otherwise, so that Unsubscribe
+// can be called from the goroutine reading C.
 func (s *Subscription) Unsubscribe(opts ...func(*frame.Frame) error) error {
 	// transition to the "closing" state
 	if !s.state.CompareAndSwap(subStateActive, subStateClosing) {
 		return ErrCompletedSubscription
 	}
+	close(s.closing)
 
 	f := frame.New(frame.UNSUBSCRIBE, frame.Id, s.id)
 
@@ -83,10 +89,10 @@ func (s *Subscription) Unsubscribe(opts ...func(*frame.Frame) error) error {
 		f.Header.Set(ReplyToHeader, s.id)
 	}
 
+	// Only readLoop may send on or close C: it may be in the middle of a send
+	// right now. It closes C itself once the connection is torn down.
 	err := s.conn.sendFrame(f)
 	if errors.Is(err, ErrClosedUnexpectedly) {
-		msg := s.subscriptionErrorMessage("connection closed unexpectedly")
-		s.closeChannel(msg)
 		return err
 	}
 
@@ -106,13 +112,6 @@ func (s *Subscription) Unsubscribe(opts ...func(*frame.Frame) error) error {
 	case <-s.done:
 		return nil
 	case <-time.After(s.unsubscribeReceiptTimeout):
-		// s.done closing can race with the timeout firing; closeChannel closes
-		// s.C before s.done, so re-check state to avoid sending on a closed s.C.
-		if s.state.Load() == subStateClosed {
-			return nil
-		}
-		msg := s.subscriptionErrorMessage("channel unsubscribe receipt timeout")
-		s.C <- msg
 		return &ErrUnsubscribeReceiptTimeout
 	}
 }
@@ -122,22 +121,14 @@ func (s *Subscription) Unsubscribe(opts ...func(*frame.Frame) error) error {
 // RECEIPT. Unlike Unsubscribe, it doesn't wait for the RECEIPT itself: there
 // is nobody left to report the outcome to.
 //
-// If the broker never confirms the resulting UNSUBSCRIBE either, the drain
-// goroutine started below (and C itself) is only reclaimed when the
-// connection closes.
+// If the broker never confirms the resulting UNSUBSCRIBE either, readLoop
+// (and C itself) is only reclaimed when the connection closes.
 func (s *Subscription) abandon() {
 	// transition to the "closing" state
 	if !s.state.CompareAndSwap(subStateActive, subStateClosing) {
 		return
 	}
-
-	// Nobody holds this subscription, so nobody will ever read C. Drain it
-	// until readLoop closes it, or messages already in flight would fill C,
-	// block readLoop on the frame channel and wedge processLoop with it.
-	go func() {
-		for range s.C {
-		}
-	}()
+	close(s.closing)
 
 	f := frame.New(frame.UNSUBSCRIBE, frame.Id, s.id)
 	if s.replyToSet {
@@ -172,12 +163,28 @@ func (s *Subscription) Read() (*Message, error) {
 func (s *Subscription) closeChannel(msg *Message) {
 	s.closeOnce.Do(func() {
 		if msg != nil {
-			s.C <- msg
+			s.deliver(msg)
 		}
 		s.state.Store(subStateClosed)
 		close(s.C)
 		close(s.done)
 	})
+}
+
+// deliver pushes msg onto C. Once the subscription is closing, C may have no
+// reader left (Unsubscribe can be called by the goroutine reading C), so a
+// message that doesn't fit is dropped rather than blocking readLoop, and
+// processLoop behind it, forever.
+func (s *Subscription) deliver(msg *Message) {
+	select {
+	case s.C <- msg:
+		return
+	default:
+	}
+	select {
+	case s.C <- msg:
+	case <-s.closing:
+	}
 }
 
 func (s *Subscription) subscriptionErrorMessage(message string) *Message {
@@ -192,12 +199,16 @@ func (s *Subscription) readLoop(ch chan *frame.Frame) {
 	for {
 		f, ok := <-ch
 		if !ok {
-			state := s.state.Load()
-			if state == subStateActive || state == subStateClosing {
-				msg := s.subscriptionErrorMessage("channel read failed")
-				s.closeChannel(msg)
+			// processLoop closes ch when the connection goes away, and leaves
+			// the reason in closeFrame to be handled like an ERROR below.
+			if f = s.conn.closeFrame.Load(); f == nil {
+				state := s.state.Load()
+				if state == subStateActive || state == subStateClosing {
+					msg := s.subscriptionErrorMessage("channel read failed")
+					s.closeChannel(msg)
+				}
+				return
 			}
-			return
 		}
 
 		switch f.Command {
@@ -212,7 +223,7 @@ func (s *Subscription) readLoop(ch chan *frame.Frame) {
 				Header:       f.Header,
 				Body:         f.Body,
 			}
-			s.C <- msg
+			s.deliver(msg)
 		case frame.ERROR:
 			state := s.state.Load()
 			if state == subStateActive || state == subStateClosing {

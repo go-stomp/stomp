@@ -3,6 +3,8 @@ package stomp
 import (
 	"context"
 	"fmt"
+	"runtime"
+	"strings"
 	"io"
 	"net"
 	"sync"
@@ -1119,4 +1121,129 @@ func TestStompConnectWithContext(t *testing.T) {
 	// the err here is "io timeout" because the server did not reply to any stomp message
 	// and the connection waited longer than the 5 seconds we set
 	require.Error(t, err)
+}
+
+func TestSendDoesNotDeadlockWhenProcessLoopExits(t *testing.T) {
+	fc1, fc2 := testutil.NewFakeConn(t)
+	defer func() { _ = fc1.Close() }()
+
+	go func() {
+		reader := frame.NewReader(fc2)
+		writer := frame.NewWriter(fc2)
+		f, err := reader.Read()
+		require.NoError(t, err)
+		require.Equal(t, frame.CONNECT, f.Command)
+		require.NoError(t, writer.Write(frame.New(frame.CONNECTED)))
+		// stop reading so that processLoop blocks writing and writeCh fills up
+	}()
+
+	client, err := Connect(fc1, ConnOpt.WriteChannelCapacity(1), ConnOpt.MsgSendTimeout(0))
+	require.NoError(t, err)
+
+	sendErr := make(chan error, 1)
+	go func() {
+		for {
+			if err := client.Send("/queue/test", "text/plain", []byte("hello")); err != nil {
+				sendErr <- err
+				return
+			}
+		}
+	}()
+
+	// let a Send block on the full writeCh while holding closeMutex
+	time.Sleep(100 * time.Millisecond)
+	_ = fc2.Close()
+
+	select {
+	case err := <-sendErr:
+		require.ErrorIs(t, err, ErrClosedUnexpectedly)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Send blocked after processLoop exited")
+	}
+}
+
+// readLoop used to block forever handing processLoop a frame after
+// processLoop had already exited, leaking the goroutine and its frames.
+func TestReadLoopExitsWithProcessLoop(t *testing.T) {
+	fc1, fc2 := testutil.NewFakeConn(t)
+	defer func() { _ = fc2.Close() }()
+
+	go func() {
+		reader := frame.NewReader(fc2)
+		writer := frame.NewWriter(fc2)
+		if _, err := reader.Read(); err != nil {
+			return
+		}
+		if writer.Write(frame.New(frame.CONNECTED)) != nil {
+			return
+		}
+		// processLoop exits on the ERROR, with more frames behind it than
+		// readCh can hold
+		if writer.Write(frame.New(frame.ERROR, frame.Message, "bye")) != nil {
+			return
+		}
+		for i := 0; i < 5; i++ {
+			if writer.Write(frame.New(frame.RECEIPT, frame.ReceiptId, "x")) != nil {
+				return
+			}
+		}
+	}()
+
+	client, err := Connect(fc1, ConnOpt.ReadChannelCapacity(1))
+	require.NoError(t, err)
+	<-client.processLoopDone
+
+	readLoop := fmt.Sprintf("stomp/v3.readLoop(%p,", client)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		buf := make([]byte, 1<<20)
+		buf = buf[:runtime.Stack(buf, true)]
+		if !strings.Contains(string(buf), readLoop) {
+			break
+		}
+		require.True(t, time.Now().Before(deadline), "readLoop did not exit")
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// A SUBSCRIBE still queued when processLoop exits was never registered, so
+// nothing closed its frame channel and Subscription.C never closed.
+func TestQueuedSubscribeClosedWhenProcessLoopExits(t *testing.T) {
+	fc1, fc2 := testutil.NewFakeConn(t)
+	defer func() { _ = fc1.Close() }()
+
+	connected := make(chan struct{})
+	go func() {
+		reader := frame.NewReader(fc2)
+		writer := frame.NewWriter(fc2)
+		if _, err := reader.Read(); err != nil {
+			return
+		}
+		_ = writer.Write(frame.New(frame.CONNECTED))
+		close(connected)
+		// stop reading, so that processLoop blocks writing the SEND below
+	}()
+
+	client, err := Connect(fc1)
+	require.NoError(t, err)
+	<-connected
+
+	require.NoError(t, client.Send("/queue/test", "text/plain", []byte("hello")))
+	sub, err := client.Subscribe("/queue/test", AckAuto)
+	require.NoError(t, err)
+
+	// processLoop exits on the write error with the SUBSCRIBE still queued
+	_ = fc2.Close()
+
+	timeout := time.After(5 * time.Second)
+	for {
+		select {
+		case _, ok := <-sub.C:
+			if !ok {
+				return
+			}
+		case <-timeout:
+			t.Fatal("Subscription.C was not closed")
+		}
+	}
 }
