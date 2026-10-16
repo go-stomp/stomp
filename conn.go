@@ -902,6 +902,7 @@ func (c *Conn) Subscribe(destination string, ack AckMode, opts ...func(*frame.Fr
 		ackMode:                   ack,
 		C:                         make(chan *Message, 16),
 		done:                      make(chan struct{}),
+		closing:                   make(chan struct{}),
 		unsubscribeReceiptTimeout: c.unsubscribeReceiptTimeout,
 	}
 	go sub.readLoop(ch)

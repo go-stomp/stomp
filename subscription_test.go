@@ -1,6 +1,7 @@
 package stomp
 
 import (
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -161,5 +162,89 @@ func sendReceiptFrame(frameId int) serverOperation {
 		err := writer.Write(f)
 		require.NoError(t, err)
 		return f, err
+	}
+}
+
+// floodServer is a fake broker that answers the first SUBSCRIBE with n
+// MESSAGEs and confirms UNSUBSCRIBE with a RECEIPT. DISCONNECT is never
+// confirmed. Any other frame it receives is passed on to the returned channel.
+func floodServer(fc *testutil.FakeConn, n int) <-chan *frame.Frame {
+	received := make(chan *frame.Frame, 100)
+	go func() {
+		defer close(received)
+		reader := frame.NewReader(fc)
+		writer := frame.NewWriter(fc)
+		f, err := reader.Read()
+		if err != nil || f.Command != frame.CONNECT {
+			return
+		}
+		if writer.Write(frame.New(frame.CONNECTED, frame.Version, "1.2")) != nil {
+			return
+		}
+
+		// the client may stop reading, so writes must not hold up reading
+		out := make(chan *frame.Frame, n+100)
+		defer close(out)
+		go func() {
+			for f := range out {
+				if writer.Write(f) != nil {
+					return
+				}
+			}
+		}()
+
+		subscribed := false
+		for {
+			f, err := reader.Read()
+			if err != nil {
+				return
+			}
+			if f == nil {
+				continue
+			}
+			switch {
+			case f.Command == frame.SUBSCRIBE && !subscribed:
+				subscribed = true
+				id := f.Header.Get(frame.Id)
+				for i := 0; i < n; i++ {
+					out <- frame.New(frame.MESSAGE,
+						frame.Subscription, id,
+						frame.Destination, "/queue/test",
+						frame.MessageId, strconv.Itoa(i))
+				}
+			case f.Command == frame.UNSUBSCRIBE:
+				out <- frame.New(frame.RECEIPT, frame.ReceiptId, f.Header.Get(frame.Receipt))
+			case f.Command != frame.DISCONNECT:
+				received <- f
+			}
+		}
+	}()
+	return received
+}
+
+// Unsubscribe called by the goroutine reading C, while more messages are in
+// flight than C can hold, used to block readLoop on the full C and
+// processLoop behind it, so the UNSUBSCRIBE never even reached the wire.
+func TestUnsubscribeFromConsumerDoesNotDeadlock(t *testing.T) {
+	fc1, fc2 := testutil.NewFakeConn(t)
+	defer func() { _ = fc1.Close() }()
+	floodServer(fc2, 100)
+
+	client, err := Connect(fc1, ConnOpt.UnsubscribeReceiptTimeout(0))
+	require.NoError(t, err)
+	sub, err := client.Subscribe("/queue/test", AckAuto)
+	require.NoError(t, err)
+
+	<-sub.C
+	// let the in-flight messages fill C
+	time.Sleep(100 * time.Millisecond)
+
+	done := make(chan error, 1)
+	go func() { done <- sub.Unsubscribe() }()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Unsubscribe blocked")
 	}
 }
